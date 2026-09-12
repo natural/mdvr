@@ -267,7 +267,9 @@ prose fixture with 2,198 blocks and measured warm reload commit-to-ready times o
 totals including poll/debounce were 331.9, 327.8, 318.0, 312.9, and 321.7 ms
 (median 321.7 ms). This meets the <200 ms post-debounce target by median on the provisional M2 Pro,
 not the unavailable M1 baseline. Intel/x86_64 and universal builds are blocked by available arm64-only target/toolchain. Unsigned arm64 app and compressed DMG were built;
-read-only DMG mount passed full bundle/Mach-O/framework/icon inspection. Original
+read-only DMG mount passed full bundle/Mach-O/framework/icon inspection. Pinned
+macOS CI now rebuilds release binary, app, and DMG and reruns mounted-image inspection
+on every push/PR. Original
 project icon is generated into ICNS. Bundle minimum macOS 11.0 matches release
 Mach-O `LC_BUILD_VERSION` and is enforced by inspection. Deterministic notices
 include license text for all 124 installed web packages plus 96 remote-fetch Cargo
