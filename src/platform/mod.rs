@@ -201,7 +201,7 @@ pub(crate) fn confirm_outside_resource(path: &Path) -> bool {
     }
 }
 
-pub(crate) fn choose_json_file() -> Option<PathBuf> {
+fn choose_path(files: bool, directories: bool, extensions: &[&str]) -> Option<PathBuf> {
     if !main_thread() {
         return None;
     }
@@ -211,16 +211,20 @@ pub(crate) fn choose_json_file() -> Option<PathBuf> {
             eprintln!("mdvr: NSOpenPanel unavailable");
             return None;
         }
-        let _: () = msg_send![panel, setCanChooseFiles: true];
-        let _: () = msg_send![panel, setCanChooseDirectories: false];
+        let _: () = msg_send![panel, setCanChooseFiles: files];
+        let _: () = msg_send![panel, setCanChooseDirectories: directories];
         let _: () = msg_send![panel, setAllowsMultipleSelection: false];
-        let extension = NSString::alloc(nil).init_str("json");
-        let types: id = msg_send![class!(NSArray), arrayWithObject: extension];
-        let _: () = msg_send![panel, setAllowedFileTypes: types];
-        let _: () = msg_send![extension, release];
+        if !extensions.is_empty() {
+            let types: id = msg_send![class!(NSMutableArray), array];
+            for extension in extensions {
+                let value = NSString::alloc(nil).init_str(extension);
+                let _: () = msg_send![types, addObject: value];
+                let _: () = msg_send![value, release];
+            }
+            let _: () = msg_send![panel, setAllowedFileTypes: types];
+        }
         let response: isize = msg_send![panel, runModal];
         if response != 1 {
-            eprintln!("mdvr: theme picker cancelled ({response})");
             return None;
         }
         let url: id = msg_send![panel, URL];
@@ -228,6 +232,18 @@ pub(crate) fn choose_json_file() -> Option<PathBuf> {
         let bytes: *const std::os::raw::c_char = msg_send![path, UTF8String];
         (!bytes.is_null()).then(|| PathBuf::from(CStr::from_ptr(bytes).to_string_lossy().as_ref()))
     }
+}
+
+pub(crate) fn choose_json_file() -> Option<PathBuf> {
+    choose_path(true, false, &["json"])
+}
+
+pub(crate) fn choose_markdown_file() -> Option<PathBuf> {
+    choose_path(true, false, &["md", "markdown"])
+}
+
+pub(crate) fn choose_directory() -> Option<PathBuf> {
+    choose_path(false, true, &[])
 }
 
 pub(crate) fn file_url_path(url: &str) -> Option<PathBuf> {

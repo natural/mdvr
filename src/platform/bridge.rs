@@ -141,6 +141,7 @@ fn is_supported(action: &ActionMessage) -> bool {
             | ActionMessage::TextScale(_)
             | ActionMessage::History(_)
             | ActionMessage::Theme(_)
+            | ActionMessage::Open(_)
     )
 }
 

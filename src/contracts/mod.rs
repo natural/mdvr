@@ -489,6 +489,8 @@ pub enum ActionMessage {
     History(HistoryAction),
     #[serde(rename = "theme")]
     Theme(ThemeAction),
+    #[serde(rename = "open")]
+    Open(OpenAction),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -524,6 +526,14 @@ pub enum ThemeAction {
     Dark,
     Import,
     Named { name: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenAction {
+    File,
+    Folder,
+    Picker,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

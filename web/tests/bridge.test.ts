@@ -52,6 +52,13 @@ test("local images use context-bound native resource requests", () => {
   expect(html).toContain("URL.revokeObjectURL(url)");
 });
 
+test("open controls request native file and folder pickers", () => {
+  expect(html).toContain('data-open="file"');
+  expect(html).toContain('data-open="folder"');
+  expect(html).toContain("kind: 'open'");
+  expect(html).toContain("event.shiftKey ? 'folder' : 'file'");
+});
+
 test("history controls and shortcuts stay native-owned", () => {
   expect(html).toContain('aria-label="Document navigation"');
   expect(html).toContain("kind: 'history'");

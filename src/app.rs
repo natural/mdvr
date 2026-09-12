@@ -25,8 +25,8 @@ use crate::{
     platform::{
         EmbeddedWebView,
         bridge::{BridgeContext, BridgeMessage},
-        choose_json_file, confirm_outside_resource, drain_bridge_messages, file_url_path,
-        open_external_url,
+        choose_directory, choose_json_file, choose_markdown_file, confirm_outside_resource,
+        drain_bridge_messages, file_url_path, open_external_url,
         remote_policy::{RemoteLimits, RemotePolicy},
         resource_policy::{ResourceAuthorization, ResourceDenied, ResourcePolicy},
         update_bridge_context,
@@ -178,7 +178,7 @@ fn dispatch_bridge_action(
             crate::contracts::TextScaleAction::Decrease => ShellCommand::DecreaseTextSize,
             crate::contracts::TextScaleAction::Reset => ShellCommand::ResetTextSize,
         }),
-        ActionMessage::History(_) | ActionMessage::Theme(_) => {}
+        ActionMessage::History(_) | ActionMessage::Theme(_) | ActionMessage::Open(_) => {}
         ActionMessage::CapturePosition(_) | ActionMessage::RestorePosition(_) => {
             unreachable!("router filters bridge actions")
         }
@@ -635,6 +635,22 @@ impl MdvrView {
                             cx.notify();
                         }
                         match action.action {
+                            ActionMessage::Open(crate::contracts::OpenAction::File) => {
+                                if let Some(path) = choose_markdown_file() {
+                                    self.pending_open.push_back(path);
+                                    cx.notify();
+                                }
+                            }
+                            ActionMessage::Open(crate::contracts::OpenAction::Folder) => {
+                                if let Some(path) = choose_directory() {
+                                    self.open_directory(path, cx);
+                                }
+                            }
+                            ActionMessage::Open(crate::contracts::OpenAction::Picker) => {
+                                if let Some(root) = self.shell.root.clone() {
+                                    self.open_directory(root, cx);
+                                }
+                            }
                             ActionMessage::History(crate::contracts::HistoryAction::Back) => {
                                 self.go_back(cx)
                             }
@@ -655,6 +671,22 @@ impl MdvrView {
                 BridgeMessage::Resource(request) => self.dispatch_resource(request),
             }
         }
+    }
+
+    fn open_directory(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if let Some(stop) = self.reload_stop.take() {
+            stop.store(true, std::sync::atomic::Ordering::Release);
+        }
+        self.reload_task = None;
+        self.web_view = None;
+        self.navigation = NavigationState::new(path.clone());
+        self.shell.root = Some(path);
+        self.shell.current_document = None;
+        self.shell.picker = Default::default();
+        self.document_committed(BridgeContext::default());
+        self.start_discovery(cx);
+        self.save_preferences();
+        cx.notify();
     }
 
     fn open_received_document(&mut self, path: PathBuf, window: &Window, cx: &mut Context<Self>) {
@@ -957,6 +989,7 @@ impl Render for MdvrView {
                 )
                 .into_any_element();
         }
+        window.focus(&self.picker_focus);
         let selected = self.shell.picker.selected().map(str::to_owned);
         let entries = self.shell.picker.visible();
         div()
