@@ -45,6 +45,12 @@ test("GIF resources are frozen to first PNG frame", () => {
   expect(main).toContain('canvas.toBlob(resolve, "image/png")');
 });
 
+test("native errors use bounded dismissible text-only status", () => {
+  expect(html).toContain('id="status" role="alert" hidden');
+  expect(html).toContain("window.mdvrShowError");
+  expect(html).toContain("status.querySelector('span').textContent = message");
+});
+
 test("reading locators are captured and restored through closed bridge messages", () => {
   expect(html).toContain("kind: 'position.captured'");
   expect(html).toContain("fallback: 'nearest_heading'");

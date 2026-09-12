@@ -179,7 +179,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   [rendered copy and select all](screenshots/rendered-copy-select-all.png).
 - Renderer posts closed `render.ready` only after synchronous DOM mount; native
   bridge rejects stale document/generation and records commit-to-ready latency.
-- Latest local verification passed 83 Rust tests/clippy, 30 web tests/build,
+- Latest local verification passed 83 Rust tests/clippy, 31 web tests/build,
   restricted-file WKWebView probe, current release build, app inspection, and DMG
   inspection.
 
@@ -196,6 +196,12 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 - Full-screen transition retained reader layout, all toolbar controls, document
   content, and scrolling without visible clipping. Evidence:
   [full screen](screenshots/full-screen.png).
+
+- Recoverable-state integration now keeps failed startup paths and exposes Retry,
+  Choose file, and Browse folder; empty/no-match picker states expose Choose folder.
+  Native runtime failures retain the current document and use a bounded dismissible
+  text-only alert. A broken Markdown link kept “Stable view,” showed the exact failed
+  path, and offered Dismiss. Evidence: [recoverable error](screenshots/recoverable-error.png).
 
 ## Unverified desktop behavior
 

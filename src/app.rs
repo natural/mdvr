@@ -233,6 +233,7 @@ struct MdvrView {
     pending_open: VecDeque<PathBuf>,
     pending_large: Option<(PathBuf, usize)>,
     pending_initial_locator: Option<ReadingLocator>,
+    failed_path: Option<PathBuf>,
     startup_error: Option<String>,
     theme_family: Option<ThemeFamily>,
     render_started: Option<Instant>,
@@ -273,6 +274,7 @@ impl MdvrView {
             pending_open: VecDeque::new(),
             pending_large: None,
             pending_initial_locator: None,
+            failed_path: None,
             startup_error: None,
             theme_family: None,
             render_started: None,
@@ -321,8 +323,8 @@ impl MdvrView {
                 cx.notify();
             }
             Err(error) => {
-                self.startup_error = Some(error.to_string());
-                eprintln!("mdvr: cannot load {}: {error}", path.display());
+                self.failed_path = Some(path.to_path_buf());
+                self.report_error(format!("Cannot load {}: {error}", path.display()));
                 window.focus(&self.picker_focus);
                 cx.notify();
             }
@@ -437,17 +439,21 @@ impl MdvrView {
     ) {
         let path = source.path.clone();
         let Some(mut web_view) = EmbeddedWebView::attach(window) else {
-            self.startup_error = Some("WKWebView attachment failed".into());
+            self.failed_path = Some(path.clone());
+            self.report_error("WKWebView attachment failed".into());
             return;
         };
         let _ = web_view.load_initial_document();
         let generation = Generation::new(1).expect("nonzero generation");
         if let Err(error) = web_view.load_document_source(&source.source, generation) {
-            self.startup_error = Some(format!("Cannot prepare {}: {error}", path.display()));
+            self.failed_path = Some(path.clone());
+            self.report_error(format!("Cannot prepare {}: {error}", path.display()));
             return;
         }
         self.navigation.open_initial(source.clone());
         self.shell.current_document = Some(path.clone());
+        self.failed_path = None;
+        self.startup_error = None;
         self.web_view = Some(web_view);
         self.watch_document(path, Some(source), cx);
         let current = self.navigation.current().expect("document was opened");
@@ -480,7 +486,24 @@ impl MdvrView {
         };
         match load_source(&path, true) {
             Ok(source) => self.attach_initial_source(source, window, cx),
-            Err(error) => self.startup_error = Some(error.to_string()),
+            Err(error) => {
+                self.failed_path = Some(path.clone());
+                self.report_error(format!("Cannot load {}: {error}", path.display()));
+            }
+        }
+    }
+
+    fn retry_failed_path(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let Some(path) = self.failed_path.clone() else {
+            return;
+        };
+        match load_source(&path, false) {
+            Ok(source) => self.attach_initial_source(source, window, cx),
+            Err(LoadError::NeedsConfirmation { path, bytes }) => {
+                self.pending_large = Some((path, bytes));
+                cx.notify();
+            }
+            Err(error) => self.report_error(format!("Cannot load {}: {error}", path.display())),
         }
     }
 
@@ -496,8 +519,8 @@ impl MdvrView {
                 cx.notify();
             }
             Err(error) => {
-                self.startup_error = Some(error.to_string());
-                eprintln!("mdvr: cannot open {}: {error}", path.display());
+                self.failed_path = Some(path.clone());
+                self.report_error(format!("Cannot open {}: {error}", path.display()));
                 cx.notify();
             }
         }
@@ -548,10 +571,7 @@ impl MdvrView {
                 self.appearance_mode = None;
                 self.save_preferences();
             }
-            Err(error) => {
-                self.startup_error = Some(format!("Theme import failed: {error}"));
-                eprintln!("mdvr: theme import failed: {error}");
-            }
+            Err(error) => self.report_error(format!("Theme import failed: {error}")),
         }
     }
 
@@ -785,7 +805,7 @@ impl MdvrView {
                 }
                 BridgeMessage::RenderError(error) => {
                     self.render_started = None;
-                    eprintln!("mdvr: renderer error: {}", error.message);
+                    self.report_error(format!("Renderer error: {}", error.message));
                 }
             }
         }
@@ -801,6 +821,8 @@ impl MdvrView {
         self.shell.root = Some(path);
         self.shell.current_document = None;
         self.shell.picker = Default::default();
+        self.failed_path = None;
+        self.startup_error = None;
         self.document_committed(BridgeContext::default());
         self.start_discovery(cx);
         self.save_preferences();
@@ -1020,8 +1042,9 @@ impl MdvrView {
                 }
             }
             Err(error) => {
+                self.failed_path = Some(path.clone());
                 let _ = self.navigation.fail_load(&request);
-                eprintln!("mdvr: navigation load failed: {error}");
+                self.report_error(format!("Cannot open {}: {error}", path.display()));
             }
         }
     }
@@ -1057,6 +1080,16 @@ impl MdvrView {
         };
         if geometry != self.preferences.window && self.preferences.set_window(geometry).is_ok() {
             self.save_preferences();
+        }
+    }
+
+    fn report_error(&mut self, message: String) {
+        eprintln!("mdvr: {message}");
+        self.startup_error = Some(message.clone());
+        if let Some(web_view) = self.web_view.as_ref()
+            && let Err(error) = web_view.show_error(&message)
+        {
+            eprintln!("mdvr: cannot show error: {error}");
         }
     }
 
@@ -1197,6 +1230,7 @@ impl Render for MdvrView {
         window.focus(&self.picker_focus);
         let selected = self.shell.picker.selected().map(str::to_owned);
         let entries = self.shell.picker.visible();
+        let can_retry = self.failed_path.is_some();
         div()
             .id("picker")
             .track_focus(&self.picker_focus)
@@ -1224,6 +1258,59 @@ impl Render for MdvrView {
             .when_some(self.startup_error.clone(), |view, error| {
                 view.child(div().text_color(gpui::rgb(0xff8a80)).child(error))
             })
+            .when(self.startup_error.is_some(), |view| {
+                view.child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .when(can_retry, |row| {
+                            row.child(
+                                div()
+                                    .id("retry-failed-path")
+                                    .px_3()
+                                    .py_2()
+                                    .rounded_sm()
+                                    .cursor_pointer()
+                                    .bg(gpui::rgb(0x3c4043))
+                                    .child("Retry")
+                                    .on_click(cx.listener(|view, _, window, cx| {
+                                        view.retry_failed_path(window, cx);
+                                    })),
+                            )
+                        })
+                        .child(
+                            div()
+                                .id("choose-file-after-error")
+                                .px_3()
+                                .py_2()
+                                .rounded_sm()
+                                .cursor_pointer()
+                                .bg(gpui::rgb(0x3c4043))
+                                .child("Choose file")
+                                .on_click(cx.listener(|view, _, _, cx| {
+                                    if let Some(path) = choose_markdown_file() {
+                                        view.pending_open.push_back(path);
+                                        cx.notify();
+                                    }
+                                })),
+                        )
+                        .child(
+                            div()
+                                .id("browse-folder-after-error")
+                                .px_3()
+                                .py_2()
+                                .rounded_sm()
+                                .cursor_pointer()
+                                .bg(gpui::rgb(0x3c4043))
+                                .child("Browse folder")
+                                .on_click(cx.listener(|view, _, _, cx| {
+                                    if let Some(path) = choose_directory() {
+                                        view.open_directory(path, cx);
+                                    }
+                                })),
+                        ),
+                )
+            })
             .child(
                 div()
                     .id("picker-list")
@@ -1249,7 +1336,30 @@ impl Render for MdvrView {
             )
             .when(
                 self.shell.picker.status().is_some() && self.shell.picker.visible().is_empty(),
-                |view| view.child("No Markdown files found"),
+                |view| {
+                    view.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child("No Markdown files found")
+                            .child(
+                                div()
+                                    .id("browse-empty-folder")
+                                    .px_3()
+                                    .py_2()
+                                    .rounded_sm()
+                                    .cursor_pointer()
+                                    .bg(gpui::rgb(0x3c4043))
+                                    .child("Choose folder")
+                                    .on_click(cx.listener(|view, _, _, cx| {
+                                        if let Some(path) = choose_directory() {
+                                            view.open_directory(path, cx);
+                                        }
+                                    })),
+                            ),
+                    )
+                },
             )
             .into_any_element()
     }

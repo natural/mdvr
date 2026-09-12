@@ -22,6 +22,9 @@
       #palette { position: fixed; z-index: 3; inset: 15% 20% auto; display: grid; gap: .35rem; padding: 1rem; border-radius: .5rem; background: Canvas; box-shadow: 0 .4rem 2rem #0008; }
       #palette[hidden] { display: none; }
       #palette button { font: inherit; text-align: left; }
+      #status { position: fixed; z-index: 4; left: 50%; bottom: 1rem; translate: -50% 0; display: flex; gap: .75rem; align-items: center; max-width: min(42rem, 90vw); padding: .65rem .85rem; border-radius: .4rem; background: Canvas; color: CanvasText; box-shadow: 0 .2rem .8rem #0006; }
+      #status[hidden] { display: none; }
+      #status button { font: inherit; }
     </style>
   </head>
   <body>
@@ -53,6 +56,7 @@
       <button type="button" data-command="theme-light">Use Light Theme</button>
       <button type="button" data-command="theme-dark">Use Dark Theme</button>
     </div>
+    <div id="status" role="alert" hidden><span></span><button type="button">Dismiss</button></div>
     <form id="search" role="search" hidden>
       <label><span class="visually-hidden">Find in document</span><input type="search" autocomplete="off" placeholder="Find in document"></label>
       <label><input type="checkbox" data-case> Match case</label>
@@ -275,6 +279,14 @@
           outlineToggle.setAttribute('aria-expanded', String(!outline.hidden));
           postNativeAction({ kind: 'outline', payload: outline.hidden ? 'close' : 'open' });
         });
+        const status = document.querySelector('#status');
+        status.querySelector('button').addEventListener('click', () => { status.hidden = true; });
+        window.mdvrShowError = (message) => {
+          if (typeof message !== 'string' || !message || message.length > 4096) return false;
+          status.querySelector('span').textContent = message;
+          status.hidden = false;
+          return true;
+        };
         window.mdvrSetHistoryAvailability = (back, forward) => {
           document.querySelector('[data-history="back"]').disabled = !back;
           document.querySelector('[data-history="forward"]').disabled = !forward;

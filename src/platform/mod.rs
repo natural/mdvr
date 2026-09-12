@@ -787,6 +787,13 @@ fn anchor_script(anchor: &str) -> Result<String, serde_json::Error> {
     ))
 }
 
+fn error_script(message: &str) -> Result<String, serde_json::Error> {
+    Ok(format!(
+        "window.mdvrShowError({});",
+        serde_json::to_string(message)?
+    ))
+}
+
 fn locator_script(locator: &Locator) -> Result<String, serde_json::Error> {
     Ok(format!(
         "window.mdvrRestoreLocator({});",
@@ -1006,6 +1013,14 @@ impl EmbeddedWebView {
         let script = anchor_script(anchor)?;
         if self.pending_state.page_ready() {
             evaluate_javascript(self.view, &script);
+        }
+        Ok(())
+    }
+
+    pub fn show_error(&self, message: &str) -> Result<(), serde_json::Error> {
+        assert!(main_thread(), "WKWebView must be used on main thread");
+        if self.pending_state.page_ready() {
+            evaluate_javascript(self.view, &error_script(message)?);
         }
         Ok(())
     }

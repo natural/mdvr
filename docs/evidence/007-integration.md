@@ -30,7 +30,10 @@ Status: **integrated feature candidate; release blockers remain in 008**.
   directories and executable-mode files are blocked. History/current state remains
   unchanged on failed or stale loads.
 - GPUI render maps search/focus/copy/select-all through `ShellState`;
-  copy/select-all require renderer or search-input focus.
+  copy/select-all require renderer or search-input focus. Startup load failures
+  retain the failed path and expose Retry, Choose file, and Browse folder; empty
+  picker results expose Choose folder. Runtime navigation/render/theme failures
+  keep the current view and use a bounded, dismissible text-only alert.
 - Bridge context updates on document commit. Queue actions are checked again at
   dispatch, so queued actions from prior document/generation are rejected.
   Renderer scroll/navigation emits validated generation-bound reading locators;
@@ -96,7 +99,7 @@ cargo test --locked                       passed; 83 tests
 cargo clippy --locked --all-targets -- -D warnings
                                            passed; 1 upstream future-incompat warning
 cd web && bun install --frozen-lockfile    passed; 135 packages
-cd web && bun test tests                   passed; 30 tests
+cd web && bun test tests                   passed; 31 tests
 cd web && bun run build                    passed
 ```
 
