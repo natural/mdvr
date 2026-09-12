@@ -174,6 +174,27 @@ pub(crate) fn drain_bridge_messages() -> Vec<BridgeMessage> {
 }
 
 /// Update action authorization context after native document commit.
+pub(crate) fn file_url_path(url: &str) -> Option<PathBuf> {
+    if !main_thread() || url.contains(char::is_control) {
+        return None;
+    }
+    unsafe {
+        let value = NSString::alloc(nil).init_str(url);
+        let target: id = msg_send![class!(NSURL), URLWithString: value];
+        let _: () = msg_send![value, release];
+        if target.is_null() {
+            return None;
+        }
+        let is_file: BOOL = msg_send![target, isFileURL];
+        if !is_file {
+            return None;
+        }
+        let path: id = msg_send![target, path];
+        let bytes: *const std::os::raw::c_char = msg_send![path, UTF8String];
+        (!bytes.is_null()).then(|| PathBuf::from(CStr::from_ptr(bytes).to_string_lossy().as_ref()))
+    }
+}
+
 pub(crate) fn open_external_url(url: &str) -> bool {
     if !main_thread() || url.contains(char::is_control) {
         return false;

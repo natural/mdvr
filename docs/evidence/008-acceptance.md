@@ -115,6 +115,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   launch state and latest safe geometry. Packaged app window was closed; process
   stayed alive; reopening bundle restored same document in new window under same
   PID. Evidence: [close and reopen](screenshots/reopen.png).
+- macOS file-open events decode native file URLs, queue paths into active app,
+  and transactionally navigate existing window; multiple events remain FIFO.
+  Packaged `open -a mdvr` changed `first.md` to `second.md`, then decoded and
+  opened `space doc.md`, with one PID/window throughout. Evidence:
+  [Finder reuse](screenshots/finder-reuse.png).
 - Latest checkpoint verified debug build, 77 Rust tests/clippy and 22 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
@@ -124,8 +129,8 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 - `--help`, `--version`, unsupported input, multiple input, missing path, and
   explicit-file validation passed.
 - Explicit-file launch remained running and printed `mdvr: accepted ...`.
-- Frontmost/process launch was confirmed for the pre-fix build and the
-  pre-fix window was observable through Orca.
+- Frontmost/process launch was confirmed. Packaged Finder-style file-open events
+  reuse active process and window.
 - Post-fix window visibly renders `readme.md` through Orca. Relative Markdown
   navigation and reload after navigation passed. Action controls, history, and
   other desktop scenarios remain unaccepted.

@@ -1,5 +1,7 @@
 use std::{
-    sync::{Arc, atomic::AtomicBool},
+    collections::VecDeque,
+    path::PathBuf,
+    sync::{Arc, Mutex, OnceLock, atomic::AtomicBool},
     time::Duration,
 };
 
@@ -23,7 +25,7 @@ use crate::{
     platform::{
         EmbeddedWebView,
         bridge::{BridgeContext, BridgeMessage},
-        drain_bridge_messages, open_external_url,
+        drain_bridge_messages, file_url_path, open_external_url,
         remote_policy::{RemoteLimits, RemotePolicy},
         resource_policy::{ResourceAuthorization, ResourcePolicy},
         update_bridge_context,
@@ -34,6 +36,24 @@ use crate::{
     theme::{AppearanceMode, default_theme},
     ui::{FocusOwner, ShellCommand, ShellState},
 };
+
+static OPEN_PATHS: OnceLock<Mutex<VecDeque<PathBuf>>> = OnceLock::new();
+
+fn enqueue_open_urls(urls: Vec<String>) {
+    let mut queue = OPEN_PATHS
+        .get_or_init(|| Mutex::new(VecDeque::new()))
+        .lock()
+        .expect("open-path queue poisoned");
+    queue.extend(urls.iter().filter_map(|url| file_url_path(url)));
+}
+
+fn drain_open_paths() -> Vec<PathBuf> {
+    OPEN_PATHS
+        .get_or_init(|| Mutex::new(VecDeque::new()))
+        .lock()
+        .map(|mut queue| queue.drain(..).collect())
+        .unwrap_or_default()
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum BridgeDispatchError {
@@ -176,6 +196,7 @@ struct MdvrView {
     preferences: Preferences,
     appearance_mode: Option<AppearanceMode>,
     picker_focus: FocusHandle,
+    pending_open: VecDeque<PathBuf>,
 }
 
 impl MdvrView {
@@ -205,6 +226,7 @@ impl MdvrView {
             preferences: Preferences::default(),
             appearance_mode: None,
             picker_focus,
+            pending_open: VecDeque::new(),
         };
         let context = view
             .navigation
@@ -474,6 +496,10 @@ impl MdvrView {
     }
 
     fn drain_bridge_messages(&mut self, cx: &mut Context<Self>) {
+        self.pending_open.extend(drain_open_paths());
+        if !self.pending_open.is_empty() {
+            cx.notify();
+        }
         for message in drain_bridge_messages() {
             match message {
                 BridgeMessage::Action(action) => {
@@ -509,6 +535,28 @@ impl MdvrView {
                 BridgeMessage::Navigation(request) => self.dispatch_navigation(request, cx),
                 BridgeMessage::Resource(request) => self.dispatch_resource(request),
             }
+        }
+    }
+
+    fn open_received_document(&mut self, path: PathBuf, window: &Window, cx: &mut Context<Self>) {
+        let Some(root) = path.parent().map(std::path::Path::to_owned) else {
+            return;
+        };
+        if let Some(current) = self.navigation.current() {
+            let generation = current.generation;
+            self.shell.root = Some(root);
+            match self.navigation.request_navigation_from(
+                &path.to_string_lossy(),
+                generation,
+                Locator::start(),
+            ) {
+                Ok(NavigationAction::Load(request)) => self.load_navigation(request, cx),
+                Ok(_) => eprintln!("mdvr: Finder open did not resolve to Markdown"),
+                Err(error) => eprintln!("mdvr: Finder open rejected: {error}"),
+            }
+        } else if let Some(name) = path.file_name() {
+            self.shell.root = Some(root);
+            self.open_picker_document(name.to_string_lossy().into_owned(), window, cx);
         }
     }
 
@@ -736,6 +784,12 @@ impl Drop for MdvrView {
 
 impl Render for MdvrView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(path) = self.pending_open.pop_front() {
+            self.open_received_document(path, window, cx);
+            if !self.pending_open.is_empty() {
+                cx.notify();
+            }
+        }
         self.update_appearance(window);
         self.capture_window_geometry(window);
         if let Some(web_view) = self.web_view.as_ref() {
@@ -864,6 +918,7 @@ fn open_mdvr_window(cx: &mut App, launch: LaunchPlan, announce: bool) {
 pub fn run(launch: LaunchPlan) {
     let reopen_launch = launch.clone();
     let application = Application::new();
+    application.on_open_urls(enqueue_open_urls);
     application.on_reopen(move |cx| {
         if cx.windows().is_empty() {
             open_mdvr_window(cx, reopen_launch.clone(), false);
