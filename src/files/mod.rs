@@ -22,6 +22,7 @@ use crate::contracts::{
 
 /// Chosen save-burst debounce. Refresh latency is measured after this delay.
 pub const RELOAD_DEBOUNCE: Duration = Duration::from_millis(75);
+pub const LARGE_SOURCE_CONFIRM_BYTES: usize = 10 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PathKind {
@@ -121,7 +122,15 @@ pub enum LoadError {
     Unreadable(PathBuf),
     NotAFile(PathBuf),
     InvalidUtf8(PathBuf),
-    NeedsConfirmation { path: PathBuf, bytes: usize },
+    NeedsConfirmation {
+        path: PathBuf,
+        bytes: usize,
+    },
+    TooLarge {
+        path: PathBuf,
+        bytes: usize,
+        max: usize,
+    },
 }
 
 impl fmt::Display for LoadError {
@@ -139,6 +148,11 @@ impl fmt::Display for LoadError {
                     path.display()
                 )
             }
+            Self::TooLarge { path, bytes, max } => write!(
+                f,
+                "file exceeds maximum size ({bytes} bytes, maximum {max}): {}",
+                path.display()
+            ),
         }
     }
 }
@@ -155,7 +169,14 @@ pub fn load_source(path: &Path, confirmed_large_file: bool) -> Result<LoadedSour
         return Err(LoadError::NotAFile(path.to_owned()));
     }
     let bytes = metadata.len() as usize;
-    if bytes > MAX_SOURCE_BYTES && !confirmed_large_file {
+    if bytes > MAX_SOURCE_BYTES {
+        return Err(LoadError::TooLarge {
+            path: path.to_owned(),
+            bytes,
+            max: MAX_SOURCE_BYTES,
+        });
+    }
+    if bytes > LARGE_SOURCE_CONFIRM_BYTES && !confirmed_large_file {
         return Err(LoadError::NeedsConfirmation {
             path: path.to_owned(),
             bytes,
@@ -834,6 +855,7 @@ pub fn spawn_reload_worker(
     path: impl Into<PathBuf>,
     initial: Option<LoadedSource>,
     generation: Generation,
+    confirmed_large_file: bool,
 ) -> Result<(Receiver<ReloadOutcome>, Arc<AtomicBool>), DiscoveryFailure> {
     let mut coordinator = ReloadCoordinator::after_generation(path, generation)?;
     if let Some(source) = initial {
@@ -842,7 +864,9 @@ pub fn spawn_reload_worker(
     let (sender, receiver) = mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = Arc::clone(&stop);
-    thread::spawn(move || reload_worker(coordinator, sender, worker_stop));
+    thread::spawn(move || {
+        reload_worker(coordinator, sender, worker_stop, confirmed_large_file);
+    });
     Ok((receiver, stop))
 }
 
@@ -850,6 +874,7 @@ fn reload_worker(
     mut coordinator: ReloadCoordinator,
     sender: Sender<ReloadOutcome>,
     stop: Arc<AtomicBool>,
+    confirmed_large_file: bool,
 ) {
     while !stop.load(Ordering::Acquire) {
         thread::sleep(Duration::from_millis(25));
@@ -857,7 +882,7 @@ fn reload_worker(
         let Ok(Some(request)) = coordinator.poll(now) else {
             continue;
         };
-        if let Some(outcome) = coordinator.complete(request, false)
+        if let Some(outcome) = coordinator.complete(request, confirmed_large_file)
             && sender.send(outcome).is_err()
         {
             break;
@@ -895,6 +920,25 @@ mod tests {
         assert!(matches!(
             resolve_path(&root, Some(Path::new("missing.md"))),
             Err(PathError::Missing(_))
+        ));
+    }
+
+    #[test]
+    fn large_sources_require_confirmation_and_keep_a_hard_ceiling() {
+        let root = temp_dir();
+        let file = root.join("large.md");
+        let handle = fs::File::create(&file).unwrap();
+        handle
+            .set_len((LARGE_SOURCE_CONFIRM_BYTES + 1) as u64)
+            .unwrap();
+        assert!(matches!(
+            load_source(&file, false),
+            Err(LoadError::NeedsConfirmation { .. })
+        ));
+        handle.set_len((MAX_SOURCE_BYTES + 1) as u64).unwrap();
+        assert!(matches!(
+            load_source(&file, true),
+            Err(LoadError::TooLarge { .. })
         ));
     }
 

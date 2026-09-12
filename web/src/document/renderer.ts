@@ -6,7 +6,7 @@ import hljs from "highlight.js/lib/common";
 import katex from "katex";
 import mermaid from "mermaid";
 
-export const MAX_SOURCE_BYTES = 10 * 1024 * 1024;
+export const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
 export const DEFAULT_RENDER_BUDGET = {
   maxDiagramBytes: 64 * 1024,
   maxDiagramLines: 2_000,
@@ -778,13 +778,13 @@ export function renderDocument(
     return {
       source,
       generation: options.generation,
-      html: `<div class="render-error">Source exceeds 10 MiB renderer budget.</div>`,
+      html: `<div class="render-error">Source exceeds 20 MiB renderer budget.</div>`,
       blocks: [],
       headings: [],
       codeBlocks: [],
       resources: [],
       errors: [
-        { kind: "source", message: "Source exceeds 10 MiB renderer budget." },
+        { kind: "source", message: "Source exceeds 20 MiB renderer budget." },
       ],
     };
   const prepared = protectMath(source);

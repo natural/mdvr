@@ -828,10 +828,12 @@ impl EmbeddedWebView {
 
     pub fn set_history_availability(&self, back: bool, forward: bool) {
         assert!(main_thread(), "WKWebView must be used on main thread");
-        evaluate_javascript(
-            self.view,
-            &format!("window.mdvrSetHistoryAvailability({back}, {forward});"),
-        );
+        if self.pending_state.page_ready() {
+            evaluate_javascript(
+                self.view,
+                &format!("window.mdvrSetHistoryAvailability({back}, {forward});"),
+            );
+        }
     }
 
     pub fn deliver_resource(&self, result: ResourceResult) -> Result<(), ContractError> {

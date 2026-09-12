@@ -18,8 +18,8 @@ use crate::{
         RootId, ScanId, SearchAction,
     },
     files::{
-        DiscoveryEvent, DiscoveryScanner, LoadedSource, ReloadOutcome, load_source,
-        spawn_reload_worker,
+        DiscoveryEvent, DiscoveryScanner, LARGE_SOURCE_CONFIRM_BYTES, LoadError, LoadedSource,
+        ReloadOutcome, load_source, spawn_reload_worker,
     },
     navigation::{LoadRequest, Locator, NavigationAction, NavigationState},
     platform::{
@@ -198,6 +198,8 @@ struct MdvrView {
     appearance_mode: Option<AppearanceMode>,
     picker_focus: FocusHandle,
     pending_open: VecDeque<PathBuf>,
+    pending_large: Option<(PathBuf, usize)>,
+    startup_error: Option<String>,
 }
 
 impl MdvrView {
@@ -228,6 +230,8 @@ impl MdvrView {
             appearance_mode: None,
             picker_focus,
             pending_open: VecDeque::new(),
+            pending_large: None,
+            startup_error: None,
         };
         let context = view
             .navigation
@@ -250,37 +254,24 @@ impl MdvrView {
             window.focus(&self.picker_focus);
             return;
         }
-        let Some(mut web_view) = EmbeddedWebView::attach(window) else {
-            return;
-        };
-        let _ = web_view.load_initial_document();
-        if let Some(path) = launch.state.document.as_deref() {
-            match load_source(path, false) {
-                Ok(source) => {
-                    let generation = Generation::new(1).expect("nonzero generation");
-                    if let Err(error) = web_view.load_document_source(&source.source, generation) {
-                        eprintln!("mdvr: cannot prepare {}: {error}", path.display());
-                    }
-                    self.navigation.open_initial(source.clone());
-                    self.watch_document(path.to_owned(), Some(source), cx);
-                }
-                Err(error) => eprintln!("mdvr: cannot load {}: {error}", path.display()),
+        let path = launch
+            .state
+            .document
+            .as_deref()
+            .expect("document checked above");
+        match load_source(path, false) {
+            Ok(source) => self.attach_initial_source(source, window, cx),
+            Err(LoadError::NeedsConfirmation { path, bytes }) => {
+                self.pending_large = Some((path, bytes));
+                window.focus(&self.picker_focus);
+                cx.notify();
             }
-        }
-        self.web_view = Some(web_view);
-        let context = self
-            .navigation
-            .current()
-            .map_or_else(BridgeContext::default, |document| BridgeContext {
-                document: Some(document.document),
-                generation: Some(document.generation),
-            });
-        self.document_committed(context);
-        self.save_preferences();
-        self.update_appearance(window);
-        if let Some(web_view) = self.web_view.as_ref() {
-            web_view.sync_frame();
-            let _ = web_view.focus();
+            Err(error) => {
+                self.startup_error = Some(error.to_string());
+                eprintln!("mdvr: cannot load {}: {error}", path.display());
+                window.focus(&self.picker_focus);
+                cx.notify();
+            }
         }
     }
 
@@ -363,23 +354,21 @@ impl MdvrView {
         cx.notify();
     }
 
-    fn open_picker_document(&mut self, relative: String, window: &Window, cx: &mut Context<Self>) {
-        let Some(root) = self.shell.root.as_deref() else {
-            return;
-        };
-        let path = root.join(relative);
-        let Ok(source) = load_source(&path, false) else {
-            eprintln!("mdvr: cannot open {}", path.display());
-            return;
-        };
+    fn attach_initial_source(
+        &mut self,
+        source: LoadedSource,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = source.path.clone();
         let Some(mut web_view) = EmbeddedWebView::attach(window) else {
-            eprintln!("mdvr: WKWebView attachment failed");
+            self.startup_error = Some("WKWebView attachment failed".into());
             return;
         };
         let _ = web_view.load_initial_document();
         let generation = Generation::new(1).expect("nonzero generation");
         if let Err(error) = web_view.load_document_source(&source.source, generation) {
-            eprintln!("mdvr: cannot prepare {}: {error}", path.display());
+            self.startup_error = Some(format!("Cannot prepare {}: {error}", path.display()));
             return;
         }
         self.navigation.open_initial(source.clone());
@@ -395,9 +384,39 @@ impl MdvrView {
         self.update_appearance(window);
         self.save_preferences();
         if let Some(web_view) = self.web_view.as_ref() {
+            web_view.sync_frame();
             let _ = web_view.focus();
         }
         cx.notify();
+    }
+
+    fn confirm_large_file(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let Some((path, _)) = self.pending_large.take() else {
+            return;
+        };
+        match load_source(&path, true) {
+            Ok(source) => self.attach_initial_source(source, window, cx),
+            Err(error) => self.startup_error = Some(error.to_string()),
+        }
+    }
+
+    fn open_picker_document(&mut self, relative: String, window: &Window, cx: &mut Context<Self>) {
+        let Some(root) = self.shell.root.as_deref() else {
+            return;
+        };
+        let path = root.join(relative);
+        match load_source(&path, false) {
+            Ok(source) => self.attach_initial_source(source, window, cx),
+            Err(LoadError::NeedsConfirmation { path, bytes }) => {
+                self.pending_large = Some((path, bytes));
+                cx.notify();
+            }
+            Err(error) => {
+                self.startup_error = Some(error.to_string());
+                eprintln!("mdvr: cannot open {}: {error}", path.display());
+                cx.notify();
+            }
+        }
     }
 
     fn document_committed(&mut self, context: BridgeContext) {
@@ -471,7 +490,10 @@ impl MdvrView {
         else {
             return;
         };
-        match spawn_reload_worker(path.clone(), source, generation) {
+        let confirmed_large_file = source
+            .as_ref()
+            .is_some_and(|source| source.bytes > LARGE_SOURCE_CONFIRM_BYTES);
+        match spawn_reload_worker(path.clone(), source, generation, confirmed_large_file) {
             Ok((receiver, stop)) => {
                 self.reload_stop = Some(stop);
                 self.reload_task = Some(cx.spawn(async move |view, cx| {
@@ -797,6 +819,36 @@ impl Render for MdvrView {
             web_view.sync_frame();
             return div().size_full().into_any_element();
         }
+        if let Some((path, bytes)) = self.pending_large.as_ref() {
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .justify_center()
+                .items_center()
+                .gap_3()
+                .bg(gpui::rgb(0x202124))
+                .text_color(gpui::rgb(0xffffff))
+                .child(format!(
+                    "{} is {:.1} MiB",
+                    path.display(),
+                    *bytes as f64 / 1_048_576.0
+                ))
+                .child(
+                    div()
+                        .id("confirm-large-file")
+                        .px_4()
+                        .py_2()
+                        .rounded_sm()
+                        .cursor_pointer()
+                        .bg(gpui::rgb(0x3c4043))
+                        .child("Open full file")
+                        .on_click(cx.listener(|view, _, window, cx| {
+                            view.confirm_large_file(window, cx);
+                        })),
+                )
+                .into_any_element();
+        }
         let selected = self.shell.picker.selected().map(str::to_owned);
         let entries = self.shell.picker.visible();
         div()
@@ -823,6 +875,9 @@ impl Render for MdvrView {
                     .text_color(gpui::rgb(0xb0b3b8))
                     .child(format!("Filter: {}", self.shell.picker.query())),
             )
+            .when_some(self.startup_error.clone(), |view, error| {
+                view.child(div().text_color(gpui::rgb(0xff8a80)).child(error))
+            })
             .child(
                 div()
                     .id("picker-list")

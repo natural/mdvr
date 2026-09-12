@@ -126,7 +126,13 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   creation, removing scripts, handlers and every href/xlink external reference.
   Live WKWebView showed only safe text/image output. Evidence:
   [hostile content](screenshots/hostile-content.png).
-- Latest checkpoint verified debug build, 77 Rust tests/clippy and 23 web tests/build.
+- Files above 10 MiB now stop on visible full-load confirmation; confirmed files
+  retain permission across reload while all source paths enforce a 20 MiB hard
+  ceiling. Live 10,485,765-byte code-heavy fixture prompted, then rendered full
+  heading/code content without truncation. Evidence:
+  [large confirmation](screenshots/large-confirm.png),
+  [large rendered](screenshots/large-rendered.png).
+- Latest checkpoint verified debug build, 78 Rust tests/clippy and 23 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 

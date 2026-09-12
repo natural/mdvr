@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 pub const CONTRACT_REVISION: u16 = 1;
 pub const MAX_TEXT_BYTES: usize = 4 * 1024;
 pub const MAX_PATH_BYTES: usize = 4 * 1024;
-pub const MAX_SOURCE_BYTES: usize = 10 * 1024 * 1024;
+pub const MAX_SOURCE_BYTES: usize = 20 * 1024 * 1024;
 pub const MAX_RESOURCE_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_FRAME_BYTES: usize = 12 * 1024 * 1024;
 pub const MAX_BATCH_ITEMS: usize = 256;
