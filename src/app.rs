@@ -23,7 +23,8 @@ use crate::{
     platform::{
         EmbeddedWebView,
         bridge::{BridgeContext, BridgeMessage},
-        drain_bridge_messages,
+        drain_bridge_messages, open_external_url,
+        remote_policy::{RemoteLimits, RemotePolicy},
         resource_policy::{ResourceAuthorization, ResourcePolicy},
         update_bridge_context,
     },
@@ -52,6 +53,14 @@ fn navigation_target_text(target: &NavigationTarget) -> String {
         | NavigationTarget::Mailto { url: path }
         | NavigationTarget::LocalFile { path } => path.clone(),
     }
+}
+
+fn valid_mailto(url: &str) -> bool {
+    url.len() <= 2 * 1024
+        && url
+            .get(..7)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("mailto:"))
+        && !url.contains(char::is_control)
 }
 
 fn resource_mime(reference: &str) -> Option<String> {
@@ -239,6 +248,7 @@ impl MdvrView {
         self.update_appearance(window);
         if let Some(web_view) = self.web_view.as_ref() {
             web_view.sync_frame();
+            let _ = web_view.focus();
         }
     }
 
@@ -352,6 +362,9 @@ impl MdvrView {
         self.appearance_mode = None;
         self.update_appearance(window);
         self.save_preferences();
+        if let Some(web_view) = self.web_view.as_ref() {
+            let _ = web_view.focus();
+        }
         cx.notify();
     }
 
@@ -450,7 +463,16 @@ impl MdvrView {
         for message in drain_bridge_messages() {
             match message {
                 BridgeMessage::Action(action) => {
-                    let _ = dispatch_bridge_action(&mut self.shell, self.bridge_context, &action);
+                    let focus_renderer = matches!(
+                        action.action,
+                        ActionMessage::Focus(crate::contracts::FocusOwner::Renderer)
+                    );
+                    if dispatch_bridge_action(&mut self.shell, self.bridge_context, &action).is_ok()
+                        && focus_renderer
+                        && let Some(web_view) = self.web_view.as_ref()
+                    {
+                        let _ = web_view.focus();
+                    }
                 }
                 BridgeMessage::Navigation(request) => self.dispatch_navigation(request, cx),
                 BridgeMessage::Resource(request) => self.dispatch_resource(request),
@@ -515,9 +537,27 @@ impl MdvrView {
                 }
             }
             Ok(NavigationAction::Load(load)) => self.load_navigation(load, cx),
-            Ok(NavigationAction::External(target)) => {
-                eprintln!("mdvr: navigation delegated to native policy: {target:?}");
-            }
+            Ok(NavigationAction::External(target)) => match target {
+                NavigationTarget::Http { url } => {
+                    let allowed = RemotePolicy::new(RemoteLimits::default())
+                        .and_then(|policy| policy.authorize(&url))
+                        .is_ok();
+                    if !allowed || !open_external_url(&url) {
+                        eprintln!("mdvr: external URL rejected");
+                    }
+                }
+                NavigationTarget::Mailto { url } => {
+                    if !valid_mailto(&url) || !open_external_url(&url) {
+                        eprintln!("mdvr: mail URL rejected");
+                    }
+                }
+                NavigationTarget::LocalFile { path } => {
+                    eprintln!("mdvr: local non-Markdown file requires confirmation: {path}");
+                }
+                NavigationTarget::Anchor { .. } | NavigationTarget::Markdown { .. } => {
+                    unreachable!("local targets are handled before external policy")
+                }
+            },
             Err(error) => eprintln!("mdvr: navigation rejected: {error}"),
         }
     }
@@ -760,6 +800,15 @@ mod tests {
             generation,
             action,
         }
+    }
+
+    #[test]
+    fn mailto_validation_is_bounded_and_blocks_control_characters() {
+        assert!(valid_mailto("MAILTO:reader@example.com"));
+        assert!(!valid_mailto(
+            "mailto:reader@example.com\r\nBcc:x@example.com"
+        ));
+        assert!(!valid_mailto(&format!("mailto:{}", "x".repeat(2048))));
     }
 
     #[test]

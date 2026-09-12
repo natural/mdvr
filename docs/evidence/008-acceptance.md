@@ -94,7 +94,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   [picker](screenshots/picker.png), [opened document](screenshots/picker-open.png).
   Native focus plus Down/Up and Return keyboard handling also passed: Down then
   Return opened `image.md`. Evidence: [keyboard open](screenshots/picker-keyboard-open.png).
-- Latest checkpoint verified debug build, 75 Rust tests/clippy and 20 web tests/build.
+- WKWebView becomes first responder after direct or picker launch; live direct
+  launch accepted ⌘F without a prerequisite document click. HTTP(S) targets now
+  pass bounded credential/private-address policy before native `NSWorkspace`
+  dispatch; bounded control-free mailto targets use same shell-free dispatch.
+- Latest checkpoint verified debug build, 76 Rust tests/clippy and 20 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 

@@ -28,7 +28,7 @@ use crate::{
 use block::Block;
 use cocoa::{
     appkit::{NSView, NSViewHeightSizable, NSViewWidthSizable, NSWindowOrderingMode},
-    base::{id, nil},
+    base::{BOOL, id, nil},
     foundation::NSString,
 };
 use gpui::Window;
@@ -174,6 +174,23 @@ pub(crate) fn drain_bridge_messages() -> Vec<BridgeMessage> {
 }
 
 /// Update action authorization context after native document commit.
+pub(crate) fn open_external_url(url: &str) -> bool {
+    if !main_thread() || url.contains(char::is_control) {
+        return false;
+    }
+    unsafe {
+        let value = NSString::alloc(nil).init_str(url);
+        let target: id = msg_send![class!(NSURL), URLWithString: value];
+        let _: () = msg_send![value, release];
+        if target.is_null() {
+            return false;
+        }
+        let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let opened: BOOL = msg_send![workspace, openURL: target];
+        opened
+    }
+}
+
 pub(crate) fn update_bridge_context(context: BridgeContext) {
     let router = BRIDGE_ROUTER.get_or_init(|| Mutex::new(BridgeRouter::new(context)));
     if let Ok(mut router) = router.lock() {
@@ -585,6 +602,18 @@ fn appearance_script(appearance: &Appearance) -> Result<String, ContractError> {
 }
 
 impl EmbeddedWebView {
+    pub fn focus(&self) -> bool {
+        assert!(main_thread(), "WKWebView must be used on main thread");
+        unsafe {
+            let window: id = msg_send![self.view, window];
+            if window.is_null() {
+                return false;
+            }
+            let accepted: BOOL = msg_send![window, makeFirstResponder: self.view];
+            accepted
+        }
+    }
+
     pub fn sync_frame(&self) {
         assert!(main_thread(), "WKWebView must be used on main thread");
         unsafe {
