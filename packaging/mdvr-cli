@@ -36,5 +36,27 @@ elif [ ! -d "$input" ]; then
     exit 2
 fi
 resolved=$(cd "$(dirname "$input")" && pwd -P)/$(basename "$input")
-/usr/bin/open -a "$app" "$resolved"
-printf 'mdvr: accepted %s\n' "$resolved"
+ipc=${TMPDIR:-/tmp}/mdvr-ipc-$(id -u)
+mkdir -p "$ipc"
+chmod 700 "$ipc"
+request=$(mktemp "$ipc/request.XXXXXX")
+mv "$request" "$request.mdvr-request"
+request=$request.mdvr-request
+ack=${request%.mdvr-request}.ack
+trap 'rm -f "$request" "$ack"' EXIT HUP INT TERM
+umask 077
+printf %s "$resolved" >"$request"
+/usr/bin/open -a "$app" "$request"
+attempt=0
+while [ "$attempt" -lt 200 ]; do
+    attempt=$((attempt + 1))
+    if [ -f "$ack" ]; then
+        result=$(cat "$ack")
+        [ "$result" = accepted ] && { printf 'mdvr: accepted %s\n' "$resolved"; exit 0; }
+        printf 'mdvr: application rejected %s\n' "$resolved" >&2
+        exit 1
+    fi
+    sleep 0.05
+done
+printf 'mdvr: application acknowledgment timed out: %s\n' "$resolved" >&2
+exit 1

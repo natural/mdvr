@@ -47,7 +47,10 @@ ln -s /Applications/mdvr.app/Contents/Resources/bin/mdvr "$HOME/.local/bin/mdvr"
 
 Bundled CLI delegates through macOS LaunchServices, so repeated CLI/Finder/Dock
 opens reuse running app. It validates argument count, path existence/readability,
-Markdown extension, UTF-8, and 20 MiB hard ceiling before reporting acceptance. Symlink it only after placing
+Markdown extension, UTF-8, and 20 MiB hard ceiling, then writes a private bounded
+request under `$TMPDIR`, waits up to 10 seconds for app consumption/load, and reports
+acceptance only after app writes its derived acknowledgment. Requests and acknowledgments
+are removed on success, rejection, signal, or timeout. Symlink it only after placing
 `mdvr.app` in `/Applications`; no shell profile is edited.
 
 `build-app.sh` fails closed unless macOS tools, the release `target/release/mdvr`

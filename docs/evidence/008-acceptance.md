@@ -145,7 +145,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   reopen loaded latest persisted `space doc.md`, not original process launch path.
   Bundled CLI now validates path/type/readability/UTF-8/size then delegates through
   LaunchServices. Two CLI opens acknowledged absolute paths, reused one PID/window,
-  and second visibly replaced first; invalid paths exit 2 before dispatch.
+  and second visibly replaced first; invalid paths exit 2 before dispatch. Launcher
+  now sends a private bounded request file, waits up to 10 seconds, and prints accepted
+  only after app consumes the request and acknowledges successful load. Live bundled
+  CLI returned `mdvr: accepted /private/tmp/mdvr-local-link/doc.md` only after current
+  app opened that document; private request/ack cleanup and timeout are fail-closed.
 - Hostile live fixture strips scripts, event handlers, CSS, frames, forms and
   orphan form inputs. Local SVG bytes now pass renderer SVG sanitizer before Blob
   creation, removing scripts, handlers and every href/xlink external reference.
@@ -188,7 +192,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   [rendered copy and select all](screenshots/rendered-copy-select-all.png).
 - Renderer posts closed `render.ready` only after synchronous DOM mount; native
   bridge rejects stale document/generation and records commit-to-ready latency.
-- Latest local verification passed 83 Rust tests/clippy, 32 web tests/build,
+- Latest local verification passed 84 Rust tests/clippy, 32 web tests/build,
   restricted-file WKWebView probe, current release build, app inspection, and DMG
   inspection.
 

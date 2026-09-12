@@ -1,5 +1,7 @@
 use std::{
     collections::VecDeque,
+    fs,
+    os::unix::fs::PermissionsExt,
     path::PathBuf,
     sync::{
         Arc, Mutex, OnceLock,
@@ -45,17 +47,57 @@ use crate::{
     ui::{FocusOwner, ShellCommand, ShellState},
 };
 
-static OPEN_PATHS: OnceLock<Mutex<VecDeque<PathBuf>>> = OnceLock::new();
+#[derive(Clone, Debug)]
+struct OpenRequest {
+    path: PathBuf,
+    ack: Option<PathBuf>,
+}
+
+static OPEN_PATHS: OnceLock<Mutex<VecDeque<OpenRequest>>> = OnceLock::new();
+
+fn decode_open_request(path: PathBuf) -> Option<OpenRequest> {
+    if path.extension().and_then(|value| value.to_str()) != Some("mdvr-request") {
+        return Some(OpenRequest { path, ack: None });
+    }
+    let directory = path.parent()?;
+    let safe_directory = directory
+        .file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.starts_with("mdvr-ipc-"))
+        && fs::metadata(directory).ok()?.permissions().mode() & 0o077 == 0
+        && fs::metadata(&path).ok()?.permissions().mode() & 0o077 == 0;
+    if !safe_directory {
+        return None;
+    }
+    let bytes = fs::read(&path).ok()?;
+    let _ = fs::remove_file(&path);
+    if bytes.is_empty() || bytes.len() > 4 * 1024 {
+        return None;
+    }
+    let target = PathBuf::from(String::from_utf8(bytes).ok()?);
+    if !target.is_absolute() {
+        return None;
+    }
+    let ack = path.with_extension("ack");
+    Some(OpenRequest {
+        path: target,
+        ack: Some(ack),
+    })
+}
 
 fn enqueue_open_urls(urls: Vec<String>) {
     let mut queue = OPEN_PATHS
         .get_or_init(|| Mutex::new(VecDeque::new()))
         .lock()
         .expect("open-path queue poisoned");
-    queue.extend(urls.iter().filter_map(|url| file_url_path(url)));
+    queue.extend(
+        urls.iter()
+            .filter_map(|url| file_url_path(url))
+            .filter_map(decode_open_request),
+    );
 }
 
-fn drain_open_paths() -> Vec<PathBuf> {
+fn drain_open_paths() -> Vec<OpenRequest> {
     OPEN_PATHS
         .get_or_init(|| Mutex::new(VecDeque::new()))
         .lock()
@@ -230,7 +272,7 @@ struct MdvrView {
     preferences: Preferences,
     appearance_mode: Option<AppearanceMode>,
     picker_focus: FocusHandle,
-    pending_open: VecDeque<PathBuf>,
+    pending_open: VecDeque<OpenRequest>,
     pending_large: Option<(PathBuf, usize)>,
     pending_initial_locator: Option<ReadingLocator>,
     failed_path: Option<PathBuf>,
@@ -767,7 +809,7 @@ impl MdvrView {
                         match action.action {
                             ActionMessage::Open(crate::contracts::OpenAction::File) => {
                                 if let Some(path) = choose_markdown_file() {
-                                    self.pending_open.push_back(path);
+                                    self.pending_open.push_back(OpenRequest { path, ack: None });
                                     cx.notify();
                                 }
                             }
@@ -908,17 +950,27 @@ impl MdvrView {
         cx.notify();
     }
 
-    fn open_received_document(&mut self, path: PathBuf, window: &Window, cx: &mut Context<Self>) {
+    fn open_received_document(
+        &mut self,
+        path: PathBuf,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if path.is_dir() {
+            self.open_directory(path, cx);
+            return true;
+        }
         let Some(root) = path.parent().map(std::path::Path::to_owned) else {
-            return;
+            return false;
         };
         if let Some(current) = self.navigation.current() {
             let generation = current.generation;
+            let locator = current.locator.clone();
             self.shell.root = Some(root);
             match self.navigation.request_navigation_from(
                 &path.to_string_lossy(),
                 generation,
-                Locator::start(),
+                locator,
             ) {
                 Ok(NavigationAction::Load(request)) => self.load_navigation(request, cx),
                 Ok(_) => eprintln!("mdvr: Finder open did not resolve to Markdown"),
@@ -928,6 +980,13 @@ impl MdvrView {
             self.shell.root = Some(root);
             self.open_picker_document(name.to_string_lossy().into_owned(), window, cx);
         }
+        self.navigation
+            .current()
+            .is_some_and(|current| current.path == path)
+            || self
+                .pending_large
+                .as_ref()
+                .is_some_and(|(pending, _)| pending == &path)
     }
 
     fn dispatch_resource(&mut self, request: ResourceRequest) {
@@ -1264,8 +1323,11 @@ impl Drop for MdvrView {
 
 impl Render for MdvrView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if let Some(path) = self.pending_open.pop_front() {
-            self.open_received_document(path, window, cx);
+        if let Some(request) = self.pending_open.pop_front() {
+            let accepted = self.open_received_document(request.path, window, cx);
+            if let Some(ack) = request.ack {
+                let _ = fs::write(ack, if accepted { "accepted" } else { "failed" });
+            }
             if !self.pending_open.is_empty() {
                 cx.notify();
             }
@@ -1368,7 +1430,8 @@ impl Render for MdvrView {
                                 .child("Choose file")
                                 .on_click(cx.listener(|view, _, _, cx| {
                                     if let Some(path) = choose_markdown_file() {
-                                        view.pending_open.push_back(path);
+                                        view.pending_open
+                                            .push_back(OpenRequest { path, ack: None });
                                         cx.notify();
                                     }
                                 })),
@@ -1572,6 +1635,23 @@ mod tests {
             "mailto:reader@example.com\r\nBcc:x@example.com"
         ));
         assert!(!valid_mailto(&format!("mailto:{}", "x".repeat(2048))));
+    }
+
+    #[test]
+    fn launch_request_file_is_private_bounded_and_consumed() {
+        let directory = std::env::temp_dir().join(format!("mdvr-ipc-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let request = directory.join("request.test.mdvr-request");
+        fs::write(&request, "/tmp/document.md").unwrap();
+        fs::set_permissions(&request, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let decoded = decode_open_request(request.clone()).unwrap();
+        assert_eq!(decoded.path, PathBuf::from("/tmp/document.md"));
+        assert_eq!(decoded.ack, Some(directory.join("request.test.ack")));
+        assert!(!request.exists());
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
