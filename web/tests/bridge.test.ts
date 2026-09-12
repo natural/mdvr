@@ -45,6 +45,15 @@ test("local images use context-bound native resource requests", () => {
   expect(html).toContain("URL.revokeObjectURL(url)");
 });
 
+test("document search is keyboard accessible and wraps", () => {
+  expect(html).toContain('role="search"');
+  expect(html).toContain("event.metaKey && event.key.toLowerCase() === 'f'");
+  expect(html).toContain(
+    "window.find(searchInput.value, false, backwards, true",
+  );
+  expect(html).toContain("event.key === 'Escape'");
+});
+
 test("only requested native actions are wired", () => {
   expect(html).toContain("kind: 'search'");
   expect(html).toContain("kind: 'copy'");

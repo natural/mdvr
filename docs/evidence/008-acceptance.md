@@ -69,7 +69,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   document are atomically saved. Isolated `HOME` runtime at 150% visibly enlarged
   reader text and preserved scale while saving paths. Evidence:
   [preferences appearance](screenshots/preferences-appearance.png).
-- Latest checkpoint verified debug build, 75 Rust tests/clippy and 16 web tests/build.
+- Embedded ⌘F opens a keyboard-accessible search surface; Enter/Shift-Enter and
+  buttons move wrapped literal matches, Escape closes and restores document focus.
+  Live WKWebView found and selected `GPUI`; revision-1 search actions reached native
+  bridge context. Evidence: [search](screenshots/search.png).
+- Latest checkpoint verified debug build, 75 Rust tests/clippy and 17 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 
@@ -89,7 +93,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 The following remain unverified against a live embedded WKWebView: resize and
 clipping, keyboard/focus transitions, close/reopen and activation, picker
 interaction, embedded selection and clipboard behavior, reload selection/locator
-preservation, action bridge execution, CSP enforcement, Mermaid async output,
+preservation, non-search action bridge execution, CSP enforcement, Mermaid async output,
 remote resource consent, dynamic system-appearance changes, imported themes, and
 window geometry restoration.
 

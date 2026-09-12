@@ -8,10 +8,20 @@
     <style nonce="mdvr-fixture">
       :root { color-scheme: light dark; font: 16px/1.6 system-ui, sans-serif; }
       body { margin: 0; background: Canvas; color: CanvasText; }
+      #search { position: fixed; z-index: 2; top: .75rem; right: .75rem; display: flex; gap: .35rem; padding: .45rem; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius: .4rem; background: Canvas; box-shadow: 0 .2rem .8rem #0004; }
+      #search[hidden] { display: none; }
+      #search input { width: 16rem; font: inherit; }
+      #search button { font: inherit; }
     </style>
   </head>
   <body>
-    <main id="document" class="reader" aria-live="polite">Loading document…</main>
+    <form id="search" role="search" hidden>
+      <label><span class="visually-hidden">Find in document</span><input type="search" autocomplete="off" placeholder="Find in document"></label>
+      <button type="button" data-step="-1" aria-label="Previous match">↑</button>
+      <button type="button" data-step="1" aria-label="Next match">↓</button>
+      <button type="button" data-close aria-label="Close search">×</button>
+    </form>
+    <main id="document" class="reader" aria-live="polite" tabindex="0">Loading document…</main>
     <script nonce="mdvr-fixture">
       (() => {
         let nextRequestId = 1;
@@ -126,6 +136,35 @@
         window.mdvrMoveSearch = (step) => postNativeAction({ kind: 'search', payload: { kind: step < 0 ? 'previous' : 'next' } });
         window.mdvrCopyCode = () => postNativeAction({ kind: 'copy', payload: { kind: 'code' } });
         window.mdvrSelectAll = () => postNativeAction({ kind: 'select_all' });
+        const search = document.querySelector('#search');
+        const searchInput = search.querySelector('input');
+        const moveSearch = (backwards = false) => {
+          if (!searchInput.value) return;
+          window.find(searchInput.value, false, backwards, true, false, false, false);
+          postNativeAction({ kind: 'search', payload: { kind: backwards ? 'previous' : 'next' } });
+        };
+        const openSearch = () => {
+          search.hidden = false;
+          searchInput.focus();
+          searchInput.select();
+          postNativeAction({ kind: 'search', payload: { kind: 'open', payload: { query: searchInput.value, case_sensitive: false } } });
+        };
+        const closeSearch = () => {
+          search.hidden = true;
+          document.querySelector('#document').focus();
+          postNativeAction({ kind: 'search', payload: { kind: 'close' } });
+        };
+        search.addEventListener('submit', (event) => { event.preventDefault(); moveSearch(event.shiftKey); });
+        search.addEventListener('click', (event) => {
+          if (!(event.target instanceof Element)) return;
+          const button = event.target.closest('button');
+          if (button?.hasAttribute('data-close')) closeSearch();
+          else if (button?.dataset.step) moveSearch(button.dataset.step === '-1');
+        });
+        document.addEventListener('keydown', (event) => {
+          if (event.metaKey && event.key.toLowerCase() === 'f') { event.preventDefault(); openSearch(); }
+          else if (event.key === 'Escape' && !search.hidden) { event.preventDefault(); closeSearch(); }
+        });
         announce('Renderer ready.');
       })();
     </script>
