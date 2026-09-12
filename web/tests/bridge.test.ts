@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 const html = await Bun.file(new URL("../index.html", import.meta.url)).text();
+const main = await Bun.file(new URL("../src/main.ts", import.meta.url)).text();
 const script = html.slice(
   html.indexOf("const validBridgeAction"),
   html.indexOf("let navigationContext"),
@@ -52,6 +53,12 @@ test("document search is keyboard accessible and wraps", () => {
     "window.find(searchInput.value, false, backwards, true",
   );
   expect(html).toContain("event.key === 'Escape'");
+});
+
+test("code copy uses exact model source with clipboard fallback", () => {
+  expect(main).toContain("model.codeBlocks[index]?.source");
+  expect(main).toContain("navigator.clipboard.writeText(source)");
+  expect(main).toContain('document.execCommand("copy")');
 });
 
 test("only requested native actions are wired", () => {

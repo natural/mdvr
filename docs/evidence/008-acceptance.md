@@ -73,7 +73,12 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   buttons move wrapped literal matches, Escape closes and restores document focus.
   Live WKWebView found and selected `GPUI`; revision-1 search actions reached native
   bridge context. Evidence: [search](screenshots/search.png).
-- Latest checkpoint verified debug build, 75 Rust tests/clippy and 17 web tests/build.
+- Every fenced block exposes an accessible Copy button. Live WKWebView copy of
+  first `readme.md` block produced exact source
+  `xcodebuild -downloadComponent MetalToolchain` on pasteboard; fallback uses a
+  temporary exact DOM range only after Clipboard API failure. Evidence:
+  [code copy](screenshots/code-copy.png).
+- Latest checkpoint verified debug build, 75 Rust tests/clippy and 18 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 
@@ -92,7 +97,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 
 The following remain unverified against a live embedded WKWebView: resize and
 clipping, keyboard/focus transitions, close/reopen and activation, picker
-interaction, embedded selection and clipboard behavior, reload selection/locator
+interaction, cross-block selection and rendered/source clipboard behavior, reload selection/locator
 preservation, non-search action bridge execution, CSP enforcement, Mermaid async output,
 remote resource consent, dynamic system-appearance changes, imported themes, and
 window geometry restoration.

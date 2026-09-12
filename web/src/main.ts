@@ -225,6 +225,34 @@ export function applyAppearance(value: unknown): boolean {
 const gate = new GenerationGate();
 let current: RenderModel | null = null;
 
+function installCodeCopy(model: RenderModel) {
+    root.querySelectorAll("pre > code").forEach((code, index) => {
+        const source = model.codeBlocks[index]?.source;
+        if (source === undefined) return;
+        const button = document.createElement("button");
+        button.className = "code-copy";
+        button.type = "button";
+        button.textContent = "Copy";
+        button.setAttribute("aria-label", "Copy code");
+        button.addEventListener("click", async () => {
+            try {
+                await navigator.clipboard.writeText(source);
+            } catch {
+                const selection = window.getSelection();
+                const range = document.createRange();
+                range.selectNodeContents(code);
+                selection?.removeAllRanges();
+                selection?.addRange(range);
+                document.execCommand("copy");
+                selection?.removeAllRanges();
+            }
+            button.textContent = "Copied";
+            (window as Window & { mdvrCopyCode?: () => void }).mdvrCopyCode?.();
+        });
+        code.parentElement?.before(button);
+    });
+}
+
 async function finishMermaid(
     model: RenderModel,
     generation: number,
@@ -256,6 +284,7 @@ export function loadDocument(source: string, generation = 1): RenderModel {
     const model = renderDocument(source, { generation });
     current = model;
     mountDocument(root, model);
+    installCodeCopy(model);
     (
         window as Window & { mdvrRequestResources?: () => void }
     ).mdvrRequestResources?.();
