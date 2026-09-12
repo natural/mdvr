@@ -106,6 +106,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   native history actions rather than browser history. Live sequence opened
   `second.md`, returned to `first.md`, then moved forward to `second.md`, retaining
   same window and transferring reload watcher. Evidence: [history](screenshots/history.png).
+- Saved validated window origin and content size now initialize GPUI bounds,
+  recover onto available displays, and update atomically from live viewport size
+  without titlebar-growth drift. Isolated 800×600 at (200,200) reopened there;
+  observed outer window was 800×632 including titlebar. Evidence:
+  [window geometry](screenshots/window-geometry.png).
 - Latest checkpoint verified debug build, 77 Rust tests/clippy and 22 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
@@ -127,8 +132,7 @@ The following remain unverified against a live embedded WKWebView: resize and
 clipping, picker text filtering and broader focus transitions, close/reopen and activation,
 cross-block selection and rendered/source clipboard behavior, reload selection/locator
 preservation, non-search action bridge execution, CSP enforcement, Mermaid async output,
-remote resource consent, dynamic system-appearance changes, imported themes, and
-window geometry restoration.
+remote resource consent, dynamic system-appearance changes, and imported themes.
 
 Unit and Bun tests cover the corresponding pure/core behavior but do not close
 these app-evidence rows.

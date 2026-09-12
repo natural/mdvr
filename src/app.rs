@@ -4,8 +4,8 @@ use std::{
 };
 
 use gpui::{
-    App, Application, Context, FocusHandle, KeyDownEvent, Render, Task, Timer, Window,
-    WindowAppearance, WindowOptions, div, prelude::*,
+    App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Render, Task, Timer, Window,
+    WindowAppearance, WindowBounds, WindowOptions, div, point, prelude::*, px, size,
 };
 
 use crate::{
@@ -28,7 +28,9 @@ use crate::{
         resource_policy::{ResourceAuthorization, ResourcePolicy},
         update_bridge_context,
     },
-    preferences::{Preferences, conventional_path, load_or_default, save},
+    preferences::{
+        DisplayBounds, Preferences, WindowGeometry, conventional_path, load_or_default, save,
+    },
     theme::{AppearanceMode, default_theme},
     ui::{FocusOwner, ShellCommand, ShellState},
 };
@@ -636,6 +638,20 @@ impl MdvrView {
         self.save_preferences();
     }
 
+    fn capture_window_geometry(&mut self, window: &Window) {
+        let bounds = window.bounds();
+        let viewport = window.viewport_size();
+        let geometry = WindowGeometry {
+            x: (bounds.origin.x / px(1.0)).round() as i32,
+            y: (bounds.origin.y / px(1.0)).round() as i32,
+            width: (viewport.width / px(1.0)).round().max(0.0) as u32,
+            height: (viewport.height / px(1.0)).round().max(0.0) as u32,
+        };
+        if geometry != self.preferences.window && self.preferences.set_window(geometry).is_ok() {
+            self.save_preferences();
+        }
+    }
+
     fn save_preferences(&mut self) {
         self.preferences.browsing_root.clone_from(&self.shell.root);
         self.preferences
@@ -721,6 +737,7 @@ impl Drop for MdvrView {
 impl Render for MdvrView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.update_appearance(window);
+        self.capture_window_geometry(window);
         if let Some(web_view) = self.web_view.as_ref() {
             web_view.sync_frame();
             return div().size_full().into_any_element();
@@ -784,14 +801,41 @@ impl Render for MdvrView {
 
 pub fn run(launch: LaunchPlan) {
     let launch_for_window = launch.clone();
+    let geometry = conventional_path()
+        .map(|path| load_or_default(&path).preferences.window)
+        .unwrap_or_default();
     Application::new().run(move |cx: &mut App| {
-        let opened = cx.open_window(WindowOptions::default(), move |_window, cx| {
-            let mut shell = ShellState::new();
-            shell.root = Some(launch_for_window.picker_root.clone());
-            shell.current_document = launch_for_window.state.document.clone();
-            let navigation = NavigationState::new(launch_for_window.picker_root.clone());
-            cx.new(|cx| MdvrView::new(shell, navigation, cx))
-        });
+        let displays = cx
+            .displays()
+            .into_iter()
+            .map(|display| {
+                let bounds = display.bounds();
+                DisplayBounds {
+                    x: (bounds.origin.x / px(1.0)).round() as i32,
+                    y: (bounds.origin.y / px(1.0)).round() as i32,
+                    width: (bounds.size.width / px(1.0)).round().max(0.0) as u32,
+                    height: (bounds.size.height / px(1.0)).round().max(0.0) as u32,
+                }
+            })
+            .collect::<Vec<_>>();
+        let geometry = geometry.restore_on(&displays);
+        let bounds = Bounds {
+            origin: point(px(geometry.x as f32), px(geometry.y as f32)),
+            size: size(px(geometry.width as f32), px(geometry.height as f32)),
+        };
+        let opened = cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                ..WindowOptions::default()
+            },
+            move |_window, cx| {
+                let mut shell = ShellState::new();
+                shell.root = Some(launch_for_window.picker_root.clone());
+                shell.current_document = launch_for_window.state.document.clone();
+                let navigation = NavigationState::new(launch_for_window.picker_root.clone());
+                cx.new(|cx| MdvrView::new(shell, navigation, cx))
+            },
+        );
         match opened {
             Ok(window) => {
                 let _ = window.update(cx, |view, native_window, cx| {
