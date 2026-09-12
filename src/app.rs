@@ -10,7 +10,8 @@ use gpui::{
 use crate::{
     LaunchPlan,
     contracts::{
-        ActionMessage, ActionMessageEnvelope, Generation, NavigationRequest, NavigationTarget,
+        ActionMessage, ActionMessageEnvelope, ErrorCode, Generation, NavigationRequest,
+        NavigationTarget, ResourceReference, ResourceRequest, ResourceResult, ResourceResultValue,
         SearchAction,
     },
     files::{LoadedSource, ReloadOutcome, load_source, spawn_reload_worker},
@@ -18,7 +19,9 @@ use crate::{
     platform::{
         EmbeddedWebView,
         bridge::{BridgeContext, BridgeMessage},
-        drain_bridge_messages, update_bridge_context,
+        drain_bridge_messages,
+        resource_policy::{ResourceAuthorization, ResourcePolicy},
+        update_bridge_context,
     },
     ui::{FocusOwner, ShellCommand, ShellState},
 };
@@ -43,6 +46,23 @@ fn navigation_target_text(target: &NavigationTarget) -> String {
         | NavigationTarget::Mailto { url: path }
         | NavigationTarget::LocalFile { path } => path.clone(),
     }
+}
+
+fn resource_mime(reference: &str) -> Option<String> {
+    let extension = std::path::Path::new(reference)
+        .extension()?
+        .to_str()?
+        .to_ascii_lowercase();
+    Some(
+        match extension.as_str() {
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "webp" => "image/webp",
+            "svg" => "image/svg+xml",
+            _ => return None,
+        }
+        .to_owned(),
+    )
 }
 
 fn action_context(action: &ActionMessageEnvelope) -> BridgeContext {
@@ -125,6 +145,7 @@ struct MdvrView {
     reload_stop: Option<Arc<AtomicBool>>,
     reload_task: Option<Task<()>>,
     bridge_task: Task<()>,
+    resource_policy: Option<ResourcePolicy>,
 }
 
 impl MdvrView {
@@ -148,6 +169,7 @@ impl MdvrView {
             reload_stop: None,
             reload_task: None,
             bridge_task,
+            resource_policy: None,
         };
         let context = view
             .navigation
@@ -195,6 +217,16 @@ impl MdvrView {
     fn document_committed(&mut self, context: BridgeContext) {
         self.bridge_context = context;
         update_bridge_context(context);
+        self.resource_policy = self
+            .shell
+            .root
+            .as_deref()
+            .zip(self.navigation.current())
+            .and_then(|(root, current)| {
+                ResourcePolicy::new(root, &current.path, current.document, current.generation)
+                    .map_err(|error| eprintln!("mdvr: cannot establish resource policy: {error:?}"))
+                    .ok()
+            });
         if let Some(web_view) = self.web_view.as_mut()
             && let Err(error) =
                 web_view.set_navigation_context(context.document, context.generation)
@@ -252,7 +284,44 @@ impl MdvrView {
                     let _ = dispatch_bridge_action(&mut self.shell, self.bridge_context, &action);
                 }
                 BridgeMessage::Navigation(request) => self.dispatch_navigation(request, cx),
+                BridgeMessage::Resource(request) => self.dispatch_resource(request),
             }
+        }
+    }
+
+    fn dispatch_resource(&mut self, request: ResourceRequest) {
+        let result = match (&mut self.resource_policy, &request.reference) {
+            (Some(policy), ResourceReference::RelativePath { value }) => {
+                match policy.authorize(std::path::Path::new(value)) {
+                    ResourceAuthorization::Allowed(grant) => policy
+                        .read_granted_resource(request.document, request.generation, grant)
+                        .ok()
+                        .and_then(|bytes| resource_mime(value).map(|mime| (mime, bytes)))
+                        .map_or(
+                            ResourceResultValue::Denied {
+                                code: ErrorCode::Denied,
+                            },
+                            |(mime, bytes)| ResourceResultValue::Bytes { mime, bytes },
+                        ),
+                    ResourceAuthorization::Denied(_) => ResourceResultValue::Denied {
+                        code: ErrorCode::Denied,
+                    },
+                }
+            }
+            _ => ResourceResultValue::Denied {
+                code: ErrorCode::Unsupported,
+            },
+        };
+        if let Some(web_view) = self.web_view.as_ref()
+            && let Err(error) = web_view.deliver_resource(ResourceResult {
+                request: request.request,
+                resource: request.resource,
+                document: request.document,
+                generation: request.generation,
+                result,
+            })
+        {
+            eprintln!("mdvr: cannot deliver resource: {error}");
         }
     }
 
@@ -460,6 +529,17 @@ mod tests {
             generation,
             action,
         }
+    }
+
+    #[test]
+    fn resource_mime_allows_only_static_image_formats() {
+        assert_eq!(
+            resource_mime("diagram.SVG").as_deref(),
+            Some("image/svg+xml")
+        );
+        assert_eq!(resource_mime("photo.jpeg").as_deref(), Some("image/jpeg"));
+        assert_eq!(resource_mime("animated.gif"), None);
+        assert_eq!(resource_mime("payload.html"), None);
     }
 
     #[test]

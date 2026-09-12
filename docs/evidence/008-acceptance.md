@@ -59,7 +59,12 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   the visible heading to `Second Reloaded`. This also verifies bridge polling and
   reload-worker transfer to the newly navigated document. Evidence:
   [navigation and reload](screenshots/navigation-reload.png).
-- Latest checkpoint verified debug build, 73 Rust tests/clippy and web tests/build.
+- Context-bound local image requests now cross the validated revision-1 bridge,
+  resolve only through native canonical-root policy, and return bounded bytes as
+  object URLs. A same-root SVG rendered in live WKWebView; unsupported formats,
+  outside-root paths, symlink escapes, and stale grants remain denied. Evidence:
+  [local resource](screenshots/local-resource.png).
+- Latest checkpoint verified debug build, 75 Rust tests/clippy and 16 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 
@@ -80,17 +85,17 @@ The following remain unverified against a live embedded WKWebView: resize and
 clipping, keyboard/focus transitions, close/reopen and activation, picker
 interaction, embedded selection and clipboard behavior, reload selection/locator
 preservation, action bridge execution, CSP enforcement, Mermaid async output,
-resource revocation, and appearance propagation.
+remote resource consent, and appearance propagation.
 
 Unit and Bun tests cover the corresponding pure/core behavior but do not close
 these app-evidence rows.
 
 ## Security and policy gaps
 
-Local canonical-root/symlink policy and remote URL validation have automated
-core tests. Embedded hostile-content execution, outside-root consent, remote
-consent, DNS resolution and destination/connect-race protection, actual HTTP
-fetch/redirect handling, and WebKit resource transport remain unverified.
+Local canonical-root/symlink policy has automated tests and live same-root
+resource transport evidence. Embedded hostile-content execution, outside-root
+consent, remote consent, DNS resolution and destination/connect-race protection,
+and actual HTTP fetch/redirect handling remain unverified.
 
 ## Performance and distribution
 

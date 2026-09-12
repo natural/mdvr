@@ -10,10 +10,11 @@ test("bridge actions use revision 1 action envelope with nonzero requests", () =
   expect(script).toContain("revision: 1");
   expect(script).toContain("kind: 'action'");
   expect(script).toContain("request: nextRequestId");
-  expect(script).toContain("document: null");
-  expect(script).toContain("generation: null");
   expect(script).toContain("JSON.stringify(envelope)");
   expect(script).toContain("nextRequestId === Number.MAX_SAFE_INTEGER ? 1");
+  expect(script).toContain(
+    "payload: { request: nextRequestId, ...navigationContext, action }",
+  );
   expect(script).not.toMatch(/\b(path|authority)\b/);
 });
 
@@ -31,8 +32,17 @@ test("bridge helper is no-op when WebKit handler is absent", () => {
   expect(script).toContain(
     "if (!handler || typeof handler.postMessage !== 'function') return false;",
   );
-  expect(script).toContain("if (!validBridgeAction(action)) return false;");
+  expect(script).toContain(
+    "if (!validBridgeAction(action) || !navigationContext) return false;",
+  );
   expect(script).toContain("catch {\n            return false;");
+});
+
+test("local images use context-bound native resource requests", () => {
+  expect(html).toContain("kind: 'resource.request'");
+  expect(html).toContain("reference: { relative_path: { value: reference } }");
+  expect(html).toContain("window.mdvrResolveResource");
+  expect(html).toContain("URL.revokeObjectURL(url)");
 });
 
 test("only requested native actions are wired", () => {

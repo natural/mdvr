@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use crate::contracts::{
     ActionMessage, ActionMessageEnvelope, ContractError, DocumentId, Generation, Message,
-    NavigationRequest, decode,
+    NavigationRequest, ResourceRequest, decode,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -38,6 +38,7 @@ pub(crate) struct BridgeRouter {
 pub(crate) enum BridgeMessage {
     Action(ActionMessageEnvelope),
     Navigation(NavigationRequest),
+    Resource(ResourceRequest),
 }
 
 impl BridgeRouter {
@@ -80,6 +81,19 @@ impl BridgeRouter {
                 }
                 BridgeMessage::Navigation(request)
             }
+            Message::ResourceRequest(request) => {
+                let actual = BridgeContext {
+                    document: Some(request.document),
+                    generation: Some(request.generation),
+                };
+                if actual != self.context {
+                    return Err(BridgeError::StaleContext {
+                        expected: self.context,
+                        actual,
+                    });
+                }
+                BridgeMessage::Resource(request)
+            }
             _ => return Err(BridgeError::NotAction),
         };
 
@@ -100,7 +114,7 @@ impl BridgeRouter {
             .into_iter()
             .filter_map(|message| match message {
                 BridgeMessage::Action(action) => Some(action),
-                BridgeMessage::Navigation(_) => None,
+                BridgeMessage::Navigation(_) | BridgeMessage::Resource(_) => None,
             })
             .collect()
     }
@@ -109,7 +123,7 @@ impl BridgeRouter {
         self.drain()
             .into_iter()
             .filter_map(|message| match message {
-                BridgeMessage::Action(_) => None,
+                BridgeMessage::Action(_) | BridgeMessage::Resource(_) => None,
                 BridgeMessage::Navigation(request) => Some(request),
             })
             .collect()
@@ -130,7 +144,8 @@ fn is_supported(action: &ActionMessage) -> bool {
 mod tests {
     use super::*;
     use crate::contracts::{
-        ActionMessage, CopyAction, Envelope, FocusOwner, RequestId, SearchAction, encode,
+        ActionMessage, CopyAction, Envelope, FocusOwner, RequestId, ResourceId, ResourceKind,
+        ResourceReference, SearchAction, encode,
     };
 
     fn id(value: u64) -> RequestId {
@@ -171,6 +186,30 @@ mod tests {
             .unwrap();
 
         assert_eq!(router.drain_actions(), vec![expected]);
+    }
+
+    #[test]
+    fn accepts_context_bound_resource_requests() {
+        let context = BridgeContext {
+            document: Some(DocumentId::new(4).unwrap()),
+            generation: Some(Generation::new(7).unwrap()),
+        };
+        let mut router = BridgeRouter::new(context);
+        let request = ResourceRequest {
+            request: id(2),
+            resource: ResourceId::new(3).unwrap(),
+            document: context.document.unwrap(),
+            generation: context.generation.unwrap(),
+            kind: ResourceKind::Image,
+            reference: ResourceReference::RelativePath {
+                value: "image.png".into(),
+            },
+        };
+
+        router
+            .accept(&encode(&Envelope::new(Message::ResourceRequest(request.clone()))).unwrap())
+            .unwrap();
+        assert_eq!(router.drain(), vec![BridgeMessage::Resource(request)]);
     }
 
     #[test]
@@ -257,6 +296,7 @@ mod tests {
             .map(|message| match message {
                 BridgeMessage::Action(action) => action.request.get(),
                 BridgeMessage::Navigation(request) => request.request.get(),
+                BridgeMessage::Resource(request) => request.request.get(),
             })
             .collect::<Vec<_>>();
         assert_eq!(requests, [1, 2, 3]);

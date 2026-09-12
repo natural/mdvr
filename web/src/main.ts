@@ -256,6 +256,9 @@ export function loadDocument(source: string, generation = 1): RenderModel {
     const model = renderDocument(source, { generation });
     current = model;
     mountDocument(root, model);
+    (
+        window as Window & { mdvrRequestResources?: () => void }
+    ).mdvrRequestResources?.();
     void finishMermaid(model, generation);
     return model;
 }

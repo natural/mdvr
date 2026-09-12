@@ -21,7 +21,7 @@ use std::{
 use crate::{
     contracts::{
         Appearance, AppearanceUpdate, ContractError, DocumentId, Envelope, Generation,
-        MAX_FRAME_BYTES, Message, decode, encode,
+        MAX_FRAME_BYTES, Message, ResourceResult, decode, encode,
     },
     platform::bridge::{BridgeContext, BridgeMessage, BridgeRouter},
 };
@@ -773,6 +773,14 @@ impl EmbeddedWebView {
         if self.pending_state.page_ready() {
             evaluate_javascript(self.view, &script);
         }
+        Ok(())
+    }
+
+    pub fn deliver_resource(&self, result: ResourceResult) -> Result<(), ContractError> {
+        assert!(main_thread(), "WKWebView must be used on main thread");
+        let json = String::from_utf8(encode(&Envelope::new(Message::ResourceResult(result)))?)
+            .expect("JSON encoding is UTF-8");
+        evaluate_javascript(self.view, &format!("window.mdvrResolveResource({json});"));
         Ok(())
     }
 

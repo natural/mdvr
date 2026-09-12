@@ -25,14 +25,14 @@
           return kind === 'open' && payload && typeof payload.query === 'string' && typeof payload.case_sensitive === 'boolean' && Object.keys(payload).length === 2;
         };
         const postNativeAction = (action) => {
-          if (!validBridgeAction(action)) return false;
+          if (!validBridgeAction(action) || !navigationContext) return false;
           const handler = window.webkit?.messageHandlers?.mdvr;
           if (!handler || typeof handler.postMessage !== 'function') return false;
           const envelope = {
             revision: 1,
             message: {
               kind: 'action',
-              payload: { request: nextRequestId, document: null, generation: null, action },
+              payload: { request: nextRequestId, ...navigationContext, action },
             },
           };
           nextRequestId = nextRequestId === Number.MAX_SAFE_INTEGER ? 1 : nextRequestId + 1;
@@ -44,6 +44,9 @@
           }
         };
         let navigationContext = null;
+        let nextResourceId = 1;
+        const resourceElements = new Map();
+        const resourceUrls = new Set();
         const validNavigationTarget = (target) => {
           if (!target || typeof target !== 'object' || Object.keys(target).length !== 1) return false;
           const [kind] = Object.keys(target);
@@ -83,6 +86,37 @@
         });
         window.mdvrSetNavigationContext = (document, generation) => {
           navigationContext = document && generation ? { document, generation } : null;
+        };
+        window.mdvrRequestResources = () => {
+          for (const url of resourceUrls) URL.revokeObjectURL(url);
+          resourceUrls.clear();
+          resourceElements.clear();
+          if (!navigationContext) return;
+          for (const placeholder of document.querySelectorAll('#document [data-mdvr-resource]')) {
+            const reference = placeholder.getAttribute('data-mdvr-resource');
+            if (!reference || /^[a-z][a-z0-9+.-]*:/i.test(reference) || reference.startsWith('//')) continue;
+            const resource = nextResourceId++;
+            resourceElements.set(resource, placeholder);
+            const envelope = { revision: 1, message: { kind: 'resource.request', payload: {
+              request: nextRequestId++, resource, ...navigationContext, kind: 'image',
+              reference: { relative_path: { value: reference } },
+            } } };
+            window.webkit?.messageHandlers?.mdvr?.postMessage(JSON.stringify(envelope));
+          }
+        };
+        window.mdvrResolveResource = (envelope) => {
+          const payload = envelope?.message?.kind === 'resource.result' ? envelope.message.payload : null;
+          if (!payload || payload.document !== navigationContext?.document || payload.generation !== navigationContext?.generation) return;
+          const placeholder = resourceElements.get(payload.resource);
+          const value = payload.result?.bytes;
+          if (!placeholder || !value || typeof value.mime !== 'string' || !Array.isArray(value.bytes)) return;
+          const url = URL.createObjectURL(new Blob([new Uint8Array(value.bytes)], { type: value.mime }));
+          const image = document.createElement('img');
+          image.alt = placeholder.getAttribute('aria-label') || '';
+          image.src = url;
+          resourceUrls.add(url);
+          placeholder.replaceWith(image);
+          resourceElements.delete(payload.resource);
         };
         window.mdvrNavigateAnchor = (anchor) => document.getElementById(anchor)?.scrollIntoView();
         const announce = () => {};
