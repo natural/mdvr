@@ -2,7 +2,7 @@ use std::{
     collections::VecDeque,
     path::PathBuf,
     sync::{Arc, Mutex, OnceLock, atomic::AtomicBool},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use gpui::{
@@ -203,6 +203,7 @@ struct MdvrView {
     pending_large: Option<(PathBuf, usize)>,
     startup_error: Option<String>,
     theme_family: Option<ThemeFamily>,
+    render_started: Option<Instant>,
 }
 
 impl MdvrView {
@@ -236,6 +237,7 @@ impl MdvrView {
             pending_large: None,
             startup_error: None,
             theme_family: None,
+            render_started: None,
         };
         let context = view
             .navigation
@@ -451,6 +453,7 @@ impl MdvrView {
 
     fn document_committed(&mut self, context: BridgeContext) {
         self.bridge_context = context;
+        self.render_started = context.document.map(|_| Instant::now());
         update_bridge_context(context);
         self.resource_policy = self
             .shell
@@ -690,6 +693,19 @@ impl MdvrView {
                 }
                 BridgeMessage::Navigation(request) => self.dispatch_navigation(request, cx),
                 BridgeMessage::Resource(request) => self.dispatch_resource(request),
+                BridgeMessage::RenderReady(ready) => {
+                    if let Some(started) = self.render_started.take() {
+                        eprintln!(
+                            "mdvr: rendered generation {} in {:.1} ms",
+                            ready.generation.get(),
+                            started.elapsed().as_secs_f64() * 1000.0
+                        );
+                    }
+                }
+                BridgeMessage::RenderError(error) => {
+                    self.render_started = None;
+                    eprintln!("mdvr: renderer error: {}", error.message);
+                }
             }
         }
     }

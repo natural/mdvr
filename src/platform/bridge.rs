@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use crate::contracts::{
     ActionMessage, ActionMessageEnvelope, ContractError, DocumentId, Generation, Message,
-    NavigationRequest, ResourceRequest, decode,
+    NavigationRequest, RenderError, RenderReady, ResourceRequest, decode,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -39,6 +39,8 @@ pub(crate) enum BridgeMessage {
     Action(ActionMessageEnvelope),
     Navigation(NavigationRequest),
     Resource(ResourceRequest),
+    RenderReady(RenderReady),
+    RenderError(RenderError),
 }
 
 impl BridgeRouter {
@@ -81,6 +83,32 @@ impl BridgeRouter {
                 }
                 BridgeMessage::Navigation(request)
             }
+            Message::RenderReady(ready) => {
+                let actual = BridgeContext {
+                    document: Some(ready.document),
+                    generation: Some(ready.generation),
+                };
+                if actual != self.context {
+                    return Err(BridgeError::StaleContext {
+                        expected: self.context,
+                        actual,
+                    });
+                }
+                BridgeMessage::RenderReady(ready)
+            }
+            Message::RenderError(error) => {
+                let actual = BridgeContext {
+                    document: Some(error.document),
+                    generation: Some(error.generation),
+                };
+                if actual != self.context {
+                    return Err(BridgeError::StaleContext {
+                        expected: self.context,
+                        actual,
+                    });
+                }
+                BridgeMessage::RenderError(error)
+            }
             Message::ResourceRequest(request) => {
                 let actual = BridgeContext {
                     document: Some(request.document),
@@ -114,7 +142,10 @@ impl BridgeRouter {
             .into_iter()
             .filter_map(|message| match message {
                 BridgeMessage::Action(action) => Some(action),
-                BridgeMessage::Navigation(_) | BridgeMessage::Resource(_) => None,
+                BridgeMessage::Navigation(_)
+                | BridgeMessage::Resource(_)
+                | BridgeMessage::RenderReady(_)
+                | BridgeMessage::RenderError(_) => None,
             })
             .collect()
     }
@@ -123,7 +154,10 @@ impl BridgeRouter {
         self.drain()
             .into_iter()
             .filter_map(|message| match message {
-                BridgeMessage::Action(_) | BridgeMessage::Resource(_) => None,
+                BridgeMessage::Action(_)
+                | BridgeMessage::Resource(_)
+                | BridgeMessage::RenderReady(_)
+                | BridgeMessage::RenderError(_) => None,
                 BridgeMessage::Navigation(request) => Some(request),
             })
             .collect()
@@ -306,6 +340,7 @@ mod tests {
                 BridgeMessage::Action(action) => action.request.get(),
                 BridgeMessage::Navigation(request) => request.request.get(),
                 BridgeMessage::Resource(request) => request.request.get(),
+                BridgeMessage::RenderReady(_) | BridgeMessage::RenderError(_) => 0,
             })
             .collect::<Vec<_>>();
         assert_eq!(requests, [1, 2, 3]);

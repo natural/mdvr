@@ -144,6 +144,18 @@
         window.mdvrSetNavigationContext = (document, generation) => {
           navigationContext = document && generation ? { document, generation } : null;
         };
+        window.mdvrPostRenderReady = (headings, generation) => {
+          if (!navigationContext || navigationContext.generation !== generation) return false;
+          const payload = {
+            ...navigationContext,
+            headings: headings.map(({ id, text, level }) => ({ id, text, level })),
+          };
+          window.webkit?.messageHandlers?.mdvr?.postMessage(JSON.stringify({
+            revision: 1,
+            message: { kind: 'render.ready', payload },
+          }));
+          return true;
+        };
         window.mdvrRequestResources = () => {
           for (const url of resourceUrls) URL.revokeObjectURL(url);
           resourceUrls.clear();

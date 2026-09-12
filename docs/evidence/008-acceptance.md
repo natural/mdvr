@@ -166,6 +166,8 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   pasted `First\n\nOpen second`. ⌘A selects document root only unless input/select
   owns focus, then preserves native control behavior. Evidence:
   [rendered copy and select all](screenshots/rendered-copy-select-all.png).
+- Renderer posts closed `render.ready` only after synchronous DOM mount; native
+  bridge rejects stale document/generation and records commit-to-ready latency.
 - Latest checkpoint verified debug build, 78 Rust tests/clippy and 29 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
@@ -177,16 +179,17 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 - Explicit-file launch remained running and printed `mdvr: accepted ...`.
 - Frontmost/process launch was confirmed. Packaged Finder-style file-open events
   reuse active process and window.
-- Post-fix window visibly renders `readme.md` through Orca. Relative Markdown
-  navigation and reload after navigation passed. Action controls, history, and
-  other desktop scenarios remain unaccepted.
+- Post-fix window visibly renders `readme.md` through Orca. Relative navigation,
+  reload, controls, history, picker, clipboard, themes, Finder/Dock lifecycle,
+  local resources, and hostile-content scenarios have live evidence above.
 
 ## Unverified desktop behavior
 
 The following remain unverified against a live embedded WKWebView: resize and
-clipping, automated picker text filtering and broader focus transitions,
-reload selection/locator
-preservation, CSP enforcement, remote resource consent and automated dynamic system-appearance switching.
+clipping, automated picker text filtering and broader focus transitions, reload
+selection/locator preservation, remote resource consent, and automated dynamic
+system-appearance switching. Hostile-content and restricted-file startup probes
+cover CSP-sensitive script/network paths, but no independent CSP report capture exists.
 
 Unit and Bun tests cover the corresponding pure/core behavior but do not close
 these app-evidence rows.
@@ -205,9 +208,12 @@ HTTP fetch/redirect handling remain unverified.
 
 ## Performance and distribution
 
-Performance distributions were not measured on the required 2020 M1 MacBook Air
-8 GB baseline. Intel/x86_64 and universal builds are blocked by the available
-arm64-only target/toolchain. Unsigned arm64 app and compressed DMG were built;
+Required 2020 M1 MacBook Air 8 GB baseline remains unavailable. Provisional
+release measurement on MacBook Pro Mac14,10, M2 Pro, 16 GB used a 1,048,576-byte
+single-code-block fixture across five cold process launches: 411.2, 426.2, 435.1,
+482.4, and 505.6 ms from native document commit to validated `render.ready`
+(median 435.1 ms; one run exceeded 500 ms). Lazy completion excluded. Intel/x86_64
+and universal builds are blocked by available arm64-only target/toolchain. Unsigned arm64 app and compressed DMG were built;
 read-only DMG mount passed full bundle/Mach-O/framework/icon inspection. Original
 project icon is generated into ICNS. Bundle minimum macOS 11.0 matches release
 Mach-O `LC_BUILD_VERSION` and is enforced by inspection. No clean-machine test,

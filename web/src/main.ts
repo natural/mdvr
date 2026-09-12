@@ -369,6 +369,16 @@ export function loadDocument(source: string, generation = 1): RenderModel {
     const model = renderDocument(source, { generation });
     current = model;
     mountDocument(root, model);
+    setTimeout(() => {
+        (
+            window as Window & {
+                mdvrPostRenderReady?: (
+                    headings: RenderModel["headings"],
+                    generation: number,
+                ) => void;
+            }
+        ).mdvrPostRenderReady?.(model.headings, generation);
+    }, 0);
     restoreView(view);
     installOutline(model);
     installCodeCopy(model);
