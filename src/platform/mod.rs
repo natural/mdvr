@@ -174,6 +174,33 @@ pub(crate) fn drain_bridge_messages() -> Vec<BridgeMessage> {
 }
 
 /// Update action authorization context after native document commit.
+pub(crate) fn confirm_outside_resource(path: &Path) -> bool {
+    if !main_thread() {
+        return false;
+    }
+    unsafe {
+        let alert: id = msg_send![class!(NSAlert), new];
+        if alert.is_null() {
+            return false;
+        }
+        let title = NSString::alloc(nil).init_str("Allow image outside document folder?");
+        let detail = NSString::alloc(nil).init_str(&path.display().to_string());
+        let allow = NSString::alloc(nil).init_str("Allow this image");
+        let cancel = NSString::alloc(nil).init_str("Cancel");
+        let _: () = msg_send![alert, setMessageText: title];
+        let _: () = msg_send![alert, setInformativeText: detail];
+        let _: id = msg_send![alert, addButtonWithTitle: allow];
+        let _: id = msg_send![alert, addButtonWithTitle: cancel];
+        let response: isize = msg_send![alert, runModal];
+        let _: () = msg_send![title, release];
+        let _: () = msg_send![detail, release];
+        let _: () = msg_send![allow, release];
+        let _: () = msg_send![cancel, release];
+        let _: () = msg_send![alert, release];
+        response == 1000
+    }
+}
+
 pub(crate) fn choose_json_file() -> Option<PathBuf> {
     if !main_thread() {
         return None;
@@ -888,7 +915,10 @@ impl EmbeddedWebView {
         assert!(main_thread(), "WKWebView must be used on main thread");
         let json = String::from_utf8(encode(&Envelope::new(Message::ResourceResult(result)))?)
             .expect("JSON encoding is UTF-8");
-        evaluate_javascript(self.view, &format!("window.mdvrResolveResource({json});"));
+        evaluate_javascript(
+            self.view,
+            &format!("void window.mdvrResolveResource({json});"),
+        );
         Ok(())
     }
 

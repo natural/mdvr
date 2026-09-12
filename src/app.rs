@@ -25,9 +25,10 @@ use crate::{
     platform::{
         EmbeddedWebView,
         bridge::{BridgeContext, BridgeMessage},
-        choose_json_file, drain_bridge_messages, file_url_path, open_external_url,
+        choose_json_file, confirm_outside_resource, drain_bridge_messages, file_url_path,
+        open_external_url,
         remote_policy::{RemoteLimits, RemotePolicy},
-        resource_policy::{ResourceAuthorization, ResourcePolicy},
+        resource_policy::{ResourceAuthorization, ResourceDenied, ResourcePolicy},
         update_bridge_context,
     },
     preferences::{
@@ -681,7 +682,19 @@ impl MdvrView {
     fn dispatch_resource(&mut self, request: ResourceRequest) {
         let result = match (&mut self.resource_policy, &request.reference) {
             (Some(policy), ResourceReference::RelativePath { value }) => {
-                match policy.authorize(std::path::Path::new(value)) {
+                let reference = std::path::Path::new(value);
+                let authorization = match policy.authorize(reference) {
+                    ResourceAuthorization::Denied(ResourceDenied::OutsideRoot) => policy
+                        .consent_candidate(reference)
+                        .ok()
+                        .filter(|path| confirm_outside_resource(path))
+                        .map_or(
+                            ResourceAuthorization::Denied(ResourceDenied::OutsideRoot),
+                            |_| policy.authorize_explicit(reference),
+                        ),
+                    authorization => authorization,
+                };
+                match authorization {
                     ResourceAuthorization::Allowed(grant) => policy
                         .read_granted_resource(request.document, request.generation, grant)
                         .ok()

@@ -173,9 +173,13 @@ these app-evidence rows.
 
 Local canonical-root/symlink policy has automated tests and live same-root
 resource transport evidence. Embedded hostile HTML/SVG sanitization passed live
-fixture plus source regressions. Outside-root consent, remote consent, DNS
-resolution and destination/connect-race protection, and actual HTTP fetch/redirect
-handling remain unverified.
+fixture plus source regressions. Outside-root reference resolved canonically,
+showed exact native path consent, then granted only that resource for current
+context; approval rendered it. Evidence:
+[outside consent](screenshots/outside-resource-consent.png),
+[approved resource](screenshots/outside-resource-approved.png).
+Remote consent, DNS resolution and destination/connect-race protection, and actual
+HTTP fetch/redirect handling remain unverified.
 
 ## Performance and distribution
 

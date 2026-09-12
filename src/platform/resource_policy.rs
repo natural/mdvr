@@ -136,6 +136,12 @@ impl ResourcePolicy {
         }
     }
 
+    pub fn consent_candidate(&self, reference: &Path) -> Result<PathBuf, ResourceDenied> {
+        let (path, bytes) = self.resolve(reference)?;
+        self.check_size(bytes)?;
+        Ok(path)
+    }
+
     /// Explicitly allow exactly one resolved outside-root resource.
     pub fn authorize_explicit(&mut self, reference: &Path) -> ResourceAuthorization {
         let (path, bytes) = match self.resolve(reference) {
