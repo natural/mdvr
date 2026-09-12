@@ -1,5 +1,5 @@
 use std::{
-    sync::{Arc, atomic::AtomicBool, mpsc::Receiver},
+    sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
 
@@ -124,54 +124,30 @@ struct MdvrView {
     bridge_context: BridgeContext,
     reload_stop: Option<Arc<AtomicBool>>,
     reload_task: Option<Task<()>>,
+    bridge_task: Task<()>,
 }
 
 impl MdvrView {
-    fn new(
-        shell: ShellState,
-        navigation: NavigationState,
-        web_view: Option<EmbeddedWebView>,
-        reload: Option<(Receiver<ReloadOutcome>, Arc<AtomicBool>)>,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let (reload_receiver, reload_stop) = reload
-            .map(|(receiver, stop)| (Some(receiver), Some(stop)))
-            .unwrap_or((None, None));
-        let reload_task = reload_receiver.map(|receiver| {
-            cx.spawn(async move |view, cx| {
-                loop {
-                    Timer::after(Duration::from_millis(25)).await;
-                    let mut outcomes = Vec::new();
-                    loop {
-                        match receiver.try_recv() {
-                            Ok(outcome) => outcomes.push(outcome),
-                            Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                            Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
-                        }
-                    }
-                    if outcomes.is_empty() {
-                        continue;
-                    }
-                    if view
-                        .update(cx, |view, _| {
-                            for outcome in outcomes {
-                                view.apply_reload(outcome);
-                            }
-                        })
-                        .is_err()
-                    {
-                        return;
-                    }
+    fn new(shell: ShellState, navigation: NavigationState, cx: &mut Context<Self>) -> Self {
+        let bridge_task = cx.spawn(async move |view, cx| {
+            loop {
+                Timer::after(Duration::from_millis(16)).await;
+                if view
+                    .update(cx, |view, cx| view.drain_bridge_messages(cx))
+                    .is_err()
+                {
+                    return;
                 }
-            })
+            }
         });
         let mut view = Self {
             shell,
             navigation,
-            web_view,
+            web_view: None,
             bridge_context: BridgeContext::default(),
-            reload_stop,
-            reload_task,
+            reload_stop: None,
+            reload_task: None,
+            bridge_task,
         };
         let context = view
             .navigation
@@ -189,7 +165,6 @@ impl MdvrView {
             return;
         };
         let _ = web_view.load_initial_document();
-        let mut initial_source = None;
         if let Some(path) = launch.state.document.as_deref() {
             match load_source(path, false) {
                 Ok(source) => {
@@ -198,35 +173,9 @@ impl MdvrView {
                         eprintln!("mdvr: cannot prepare {}: {error}", path.display());
                     }
                     self.navigation.open_initial(source.clone());
-                    initial_source = Some(source);
+                    self.watch_document(path.to_owned(), Some(source), cx);
                 }
                 Err(error) => eprintln!("mdvr: cannot load {}: {error}", path.display()),
-            }
-            match spawn_reload_worker(path.to_owned(), initial_source) {
-                Ok((receiver, stop)) => {
-                    self.reload_stop = Some(stop);
-                    self.reload_task = Some(cx.spawn(async move |view, cx| {
-                        loop {
-                            Timer::after(Duration::from_millis(25)).await;
-                            let mut outcomes = Vec::new();
-                            while let Ok(outcome) = receiver.try_recv() {
-                                outcomes.push(outcome);
-                            }
-                            if !outcomes.is_empty()
-                                && view
-                                    .update(cx, |view, _| {
-                                        for outcome in outcomes {
-                                            view.apply_reload(outcome);
-                                        }
-                                    })
-                                    .is_err()
-                            {
-                                return;
-                            }
-                        }
-                    }));
-                }
-                Err(error) => eprintln!("mdvr: cannot watch {}: {error}", path.display()),
             }
         }
         self.web_view = Some(web_view);
@@ -254,18 +203,60 @@ impl MdvrView {
         }
     }
 
-    fn drain_bridge_messages(&mut self) {
+    fn watch_document(
+        &mut self,
+        path: std::path::PathBuf,
+        source: Option<LoadedSource>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(stop) = self.reload_stop.take() {
+            stop.store(true, std::sync::atomic::Ordering::Release);
+        }
+        self.reload_task = None;
+        let Some(generation) = self
+            .navigation
+            .current()
+            .map(|document| document.generation)
+        else {
+            return;
+        };
+        match spawn_reload_worker(path.clone(), source, generation) {
+            Ok((receiver, stop)) => {
+                self.reload_stop = Some(stop);
+                self.reload_task = Some(cx.spawn(async move |view, cx| {
+                    loop {
+                        Timer::after(Duration::from_millis(25)).await;
+                        let outcomes: Vec<_> = receiver.try_iter().collect();
+                        if !outcomes.is_empty()
+                            && view
+                                .update(cx, |view, _| {
+                                    for outcome in outcomes {
+                                        view.apply_reload(outcome);
+                                    }
+                                })
+                                .is_err()
+                        {
+                            return;
+                        }
+                    }
+                }));
+            }
+            Err(error) => eprintln!("mdvr: cannot watch {}: {error}", path.display()),
+        }
+    }
+
+    fn drain_bridge_messages(&mut self, cx: &mut Context<Self>) {
         for message in drain_bridge_messages() {
             match message {
                 BridgeMessage::Action(action) => {
                     let _ = dispatch_bridge_action(&mut self.shell, self.bridge_context, &action);
                 }
-                BridgeMessage::Navigation(request) => self.dispatch_navigation(request),
+                BridgeMessage::Navigation(request) => self.dispatch_navigation(request, cx),
             }
         }
     }
 
-    fn dispatch_navigation(&mut self, request: NavigationRequest) {
+    fn dispatch_navigation(&mut self, request: NavigationRequest, cx: &mut Context<Self>) {
         let Some(current) = self.navigation.current() else {
             return;
         };
@@ -285,7 +276,7 @@ impl MdvrView {
                     eprintln!("mdvr: cannot navigate anchor: {error}");
                 }
             }
-            Ok(NavigationAction::Load(load)) => self.load_navigation(load),
+            Ok(NavigationAction::Load(load)) => self.load_navigation(load, cx),
             Ok(NavigationAction::External(target)) => {
                 eprintln!("mdvr: navigation delegated to native policy: {target:?}");
             }
@@ -293,15 +284,20 @@ impl MdvrView {
         }
     }
 
-    fn load_navigation(&mut self, request: LoadRequest) {
-        match load_source(&request.path, false) {
+    fn load_navigation(&mut self, request: LoadRequest, cx: &mut Context<Self>) {
+        let path = request.path.clone();
+        match load_source(&path, false) {
             Ok(source) => {
+                let watched_source = source.clone();
                 let accepted = self.web_view.as_mut().map_or(Ok(true), |web_view| {
                     web_view.load_document_source(&source.source, request.generation)
                 });
                 match accepted {
                     Ok(true) => match self.navigation.commit_load(request, source) {
-                        Ok(document) => self.commit_document(document),
+                        Ok(document) => {
+                            self.commit_document(document);
+                            self.watch_document(path, Some(watched_source), cx);
+                        }
                         Err(error) => eprintln!("mdvr: stale navigation completion: {error}"),
                     },
                     Ok(false) => {
@@ -332,16 +328,16 @@ impl MdvrView {
     }
 
     #[allow(dead_code)]
-    fn go_back(&mut self) {
+    fn go_back(&mut self, cx: &mut Context<Self>) {
         if let Ok(Some(request)) = self.navigation.go_back(Locator::start()) {
-            self.load_navigation(request);
+            self.load_navigation(request, cx);
         }
     }
 
     #[allow(dead_code)]
-    fn go_forward(&mut self) {
+    fn go_forward(&mut self, cx: &mut Context<Self>) {
         if let Ok(Some(request)) = self.navigation.go_forward(Locator::start()) {
-            self.load_navigation(request);
+            self.load_navigation(request, cx);
         }
     }
 
@@ -392,12 +388,12 @@ impl Drop for MdvrView {
             stop.store(true, std::sync::atomic::Ordering::Release);
         }
         let _ = self.reload_task.take();
+        let _ = &self.bridge_task;
     }
 }
 
 impl Render for MdvrView {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        self.drain_bridge_messages();
         // Keep shell state native-owned while the WebKit view remains the only
         // interactive surface in this composition slice.
         let _renderer_has_focus = self.shell.focus.owner() == FocusOwner::Renderer;
@@ -420,7 +416,7 @@ pub fn run(launch: LaunchPlan) {
             shell.root = Some(launch_for_window.picker_root.clone());
             shell.current_document = launch_for_window.state.document.clone();
             let navigation = NavigationState::new(launch_for_window.picker_root.clone());
-            cx.new(|cx| MdvrView::new(shell, navigation, None, None, cx))
+            cx.new(|cx| MdvrView::new(shell, navigation, cx))
         });
         match opened {
             Ok(window) => {

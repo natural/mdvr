@@ -41,7 +41,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 - After callback registration was fixed, `target/debug/mdvr readme.md` showed
   styled `Loading document…` text in Orca. Navigation allow and finish callbacks
   were observed. Subsequent renderer startup failed because WebKit rejected
-  external ES modules over `file://`. `web/build.ts` now changes the generated
+  external ES modules over `file://`. `web/build.mjs` now changes the generated
   self-contained script to classic `defer`, preserving CSP and restricted read
   access. The built bundle initializes and renders Markdown.
 - Runtime regression command:
@@ -54,7 +54,12 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 - Source is queued until `didFinishNavigation`. Regression tests cover callback
   class registration and latest-generation pending-source drain. The queue write
   now executes in release builds too, rather than only inside `debug_assert!`.
-- Latest checkpoint verified debug build, Rust tests/clippy and web tests/build.
+- Live revision-1 navigation bridge acceptance passed: clicking a relative
+  Markdown link changed `First` to `Second`; editing that second file then changed
+  the visible heading to `Second Reloaded`. This also verifies bridge polling and
+  reload-worker transfer to the newly navigated document. Evidence:
+  [navigation and reload](screenshots/navigation-reload.png).
+- Latest checkpoint verified debug build, 73 Rust tests/clippy and web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 
@@ -65,15 +70,16 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 - Explicit-file launch remained running and printed `mdvr: accepted ...`.
 - Frontmost/process launch was confirmed for the pre-fix build and the
   pre-fix window was observable through Orca.
-- Post-fix window visibly renders `readme.md` through Orca. Link navigation,
-  action bridge, reload, and other desktop scenarios remain unaccepted.
+- Post-fix window visibly renders `readme.md` through Orca. Relative Markdown
+  navigation and reload after navigation passed. Action controls, history, and
+  other desktop scenarios remain unaccepted.
 
 ## Unverified desktop behavior
 
 The following remain unverified against a live embedded WKWebView: resize and
 clipping, keyboard/focus transitions, close/reopen and activation, picker
 interaction, embedded selection and clipboard behavior, reload selection/locator
-preservation, bridge callback execution, CSP enforcement, Mermaid async output,
+preservation, action bridge execution, CSP enforcement, Mermaid async output,
 resource revocation, and appearance propagation.
 
 Unit and Bun tests cover the corresponding pure/core behavior but do not close

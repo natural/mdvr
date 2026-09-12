@@ -770,10 +770,20 @@ pub enum ReloadOutcome {
 
 impl ReloadCoordinator {
     pub fn new(path: impl Into<PathBuf>) -> Result<Self, DiscoveryFailure> {
+        Self::after_generation(path, Generation::new(1).expect("nonzero generation"))
+    }
+
+    fn after_generation(
+        path: impl Into<PathBuf>,
+        generation: Generation,
+    ) -> Result<Self, DiscoveryFailure> {
         let path = path.into();
+        let mut state = ReloadState::new(path.clone());
+        state.next_generation = generation.get();
+        state.active = generation;
         Ok(Self {
             watcher: PollingWatcher::new(&path)?,
-            state: ReloadState::new(path),
+            state,
         })
     }
 
@@ -823,8 +833,9 @@ impl ReloadCoordinator {
 pub fn spawn_reload_worker(
     path: impl Into<PathBuf>,
     initial: Option<LoadedSource>,
+    generation: Generation,
 ) -> Result<(Receiver<ReloadOutcome>, Arc<AtomicBool>), DiscoveryFailure> {
-    let mut coordinator = ReloadCoordinator::new(path)?;
+    let mut coordinator = ReloadCoordinator::after_generation(path, generation)?;
     if let Some(source) = initial {
         coordinator.seed(source);
     }
@@ -940,6 +951,20 @@ mod tests {
         assert!(!state.failed(old, LoadError::Missing(path.clone())));
         assert!(state.failed(current, LoadError::Missing(path)));
         assert_eq!(state.visible(), Some(&source));
+    }
+
+    #[test]
+    fn coordinator_continues_document_generation_after_navigation() {
+        let root = temp_dir();
+        let path = root.join("doc.md");
+        fs::write(&path, "before").unwrap();
+        let mut coordinator = ReloadCoordinator::after_generation(
+            &path,
+            Generation::new(8).expect("nonzero generation"),
+        )
+        .unwrap();
+
+        assert_eq!(coordinator.state.request(UNIX_EPOCH).generation.get(), 9);
     }
 
     #[test]
