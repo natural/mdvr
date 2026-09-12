@@ -143,6 +143,36 @@ test("rejects stale async render completion", async () => {
   expect(gate.accept(2, "new")).toEqual({ generation: 2, value: "new" });
 });
 
+test("F rendering fixture uses bundled parser, grammars, math, and diagrams", async () => {
+  const source = await (await fixture("documents/rendering.md")).text();
+  const model = renderDocument(source);
+  expect(model.headings.map(({ id }) => id)).toContain("html-heading");
+  expect(
+    model.codeBlocks.filter(({ highlighted }) => highlighted).length,
+  ).toBeGreaterThan(20);
+  expect(
+    model.codeBlocks.find(({ language }) => language === null)?.highlighted,
+  ).toBe(false);
+  expect(model.html).toContain("hljs-");
+  expect(model.html).toContain("katex");
+  expect(model.html).toContain("diagram-pending");
+  expect(model.resources.map(({ alt }) => alt)).toEqual([
+    "png",
+    "jpeg",
+    "gif",
+    "webp",
+    "svg",
+    "missing",
+  ]);
+});
+
+test("F malformed fixture reports useful bounded errors", async () => {
+  const source = await (await fixture("security/malformed.md")).text();
+  const model = renderDocument(source);
+  expect(model.errors.map(({ kind }) => kind)).toContain("math");
+  expect(model.errors.map(({ kind }) => kind)).toContain("mermaid");
+});
+
 test("F security fixture produces no executable document content", async () => {
   const source = await (await fixture("security/hostile.md")).text();
   const model = renderDocument(source);

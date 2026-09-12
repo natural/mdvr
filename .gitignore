@@ -25,4 +25,5 @@ temp-*.md
 # Web dependencies and generated bundles
 node_modules/
 web/dist/
+packaging/build/
 .DS_Store

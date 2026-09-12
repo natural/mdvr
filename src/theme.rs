@@ -20,6 +20,7 @@ pub enum ThemeError {
     Json(String),
     Invalid(&'static str),
     InvalidValue(String),
+    Contract(String),
     TooManyMembers,
 }
 
@@ -102,10 +103,9 @@ impl AppearanceTokens {
         Ok(self)
     }
 
-    #[cfg(target_os = "macos")]
     pub fn as_revision_one(&self) -> Result<crate::contracts::Appearance, ThemeError> {
         self.validate()?;
-        Ok(crate::contracts::Appearance {
+        let appearance = crate::contracts::Appearance {
             mode: match self.mode {
                 AppearanceMode::Light => crate::contracts::AppearanceMode::Light,
                 AppearanceMode::Dark => crate::contracts::AppearanceMode::Dark,
@@ -135,7 +135,15 @@ impl AppearanceTokens {
                     italic: token.italic,
                 })
                 .collect(),
-        })
+        };
+        crate::contracts::encode(&crate::contracts::Envelope::new(
+            crate::contracts::Message::AppearanceUpdate(crate::contracts::AppearanceUpdate {
+                document: None,
+                appearance: appearance.clone(),
+            }),
+        ))
+        .map_err(|error| ThemeError::Contract(error.to_string()))?;
+        Ok(appearance)
     }
 }
 
@@ -552,5 +560,15 @@ mod tests {
         assert_eq!(current.tokens.mode, AppearanceMode::Dark);
         assert!(current.tokens.clone().with_scale(301).is_err());
         assert!(import_family(&"x".repeat(MAX_THEME_BYTES + 1)).is_err());
+    }
+
+    #[test]
+    fn revision_one_appearance_is_contract_validated() {
+        let appearance = default_theme(AppearanceMode::Dark)
+            .tokens
+            .as_revision_one()
+            .unwrap();
+        assert_eq!(appearance.mode, crate::contracts::AppearanceMode::Dark);
+        assert_eq!(appearance.reader_background, "#1e1e1e");
     }
 }

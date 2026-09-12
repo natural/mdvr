@@ -9,7 +9,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc::{self, Receiver, TryRecvError},
+        mpsc::{self, Receiver, Sender, TryRecvError},
     },
     thread,
     time::{Duration, SystemTime},
@@ -115,7 +115,7 @@ impl LoadedSource {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum LoadError {
     Missing(PathBuf),
     Unreadable(PathBuf),
@@ -697,6 +697,13 @@ impl ReloadState {
         self.error.as_ref()
     }
 
+    pub fn seed(&mut self, source: LoadedSource) {
+        debug_assert_eq!(source.path, self.path);
+        self.visible = Some(source);
+        self.error = None;
+        self.pending_since = None;
+    }
+
     pub fn request(&mut self, now: SystemTime) -> ReloadRequest {
         self.next_generation = self.next_generation.saturating_add(1);
         self.active = Generation::new(self.next_generation).expect("generation counter overflow");
@@ -704,6 +711,16 @@ impl ReloadState {
         ReloadRequest {
             generation: self.active,
         }
+    }
+
+    fn ready_request(&mut self, now: SystemTime) -> Option<ReloadRequest> {
+        if !self.debounce_elapsed(now) {
+            return None;
+        }
+        self.pending_since = None;
+        Some(ReloadRequest {
+            generation: self.active,
+        })
     }
 
     pub fn ready(&mut self, request: ReloadRequest, source: LoadedSource) -> bool {
@@ -731,13 +748,119 @@ impl ReloadState {
     }
 }
 
+/// Coordinates polling, save-burst debounce, complete reads, and stale results.
+/// Filesystem work can run on a worker; GPUI only consumes [`ReloadOutcome`].
+#[derive(Debug)]
+pub struct ReloadCoordinator {
+    watcher: PollingWatcher,
+    state: ReloadState,
+}
+
+#[derive(Debug)]
+pub enum ReloadOutcome {
+    Ready {
+        request: ReloadRequest,
+        source: LoadedSource,
+    },
+    Failed {
+        request: ReloadRequest,
+        error: LoadError,
+    },
+}
+
+impl ReloadCoordinator {
+    pub fn new(path: impl Into<PathBuf>) -> Result<Self, DiscoveryFailure> {
+        let path = path.into();
+        Ok(Self {
+            watcher: PollingWatcher::new(&path)?,
+            state: ReloadState::new(path),
+        })
+    }
+
+    pub fn seed(&mut self, source: LoadedSource) {
+        self.state.seed(source);
+    }
+
+    pub fn state(&self) -> &ReloadState {
+        &self.state
+    }
+
+    /// Poll is cheap; it never reads source. Return read work only after debounce.
+    pub fn poll(&mut self, now: SystemTime) -> Result<Option<ReloadRequest>, DiscoveryFailure> {
+        if matches!(
+            self.watcher.poll()?,
+            PollEvent::Changed
+                | PollEvent::Deleted
+                | PollEvent::Reappeared
+                | PollEvent::ParentChanged
+        ) {
+            self.state.request(now);
+        }
+        Ok(self.state.ready_request(now))
+    }
+
+    /// Read complete source and commit only matching generation. Failed reads do
+    /// not replace last-good source; reappearance creates a new request.
+    pub fn complete(
+        &mut self,
+        request: ReloadRequest,
+        confirmed_large_file: bool,
+    ) -> Option<ReloadOutcome> {
+        match load_source(self.state.path(), confirmed_large_file) {
+            Ok(source) if self.state.ready(request, source.clone()) => {
+                Some(ReloadOutcome::Ready { request, source })
+            }
+            Err(error) if self.state.failed(request, error.to_owned()) => {
+                Some(ReloadOutcome::Failed { request, error })
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Start non-GPUI polling and complete reads. Worker exits when `stop` is set
+/// or result receiver is dropped. Poll interval bounds detection latency only.
+pub fn spawn_reload_worker(
+    path: impl Into<PathBuf>,
+    initial: Option<LoadedSource>,
+) -> Result<(Receiver<ReloadOutcome>, Arc<AtomicBool>), DiscoveryFailure> {
+    let mut coordinator = ReloadCoordinator::new(path)?;
+    if let Some(source) = initial {
+        coordinator.seed(source);
+    }
+    let (sender, receiver) = mpsc::channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let worker_stop = Arc::clone(&stop);
+    thread::spawn(move || reload_worker(coordinator, sender, worker_stop));
+    Ok((receiver, stop))
+}
+
+fn reload_worker(
+    mut coordinator: ReloadCoordinator,
+    sender: Sender<ReloadOutcome>,
+    stop: Arc<AtomicBool>,
+) {
+    while !stop.load(Ordering::Acquire) {
+        thread::sleep(Duration::from_millis(25));
+        let now = SystemTime::now();
+        let Ok(Some(request)) = coordinator.poll(now) else {
+            continue;
+        };
+        if let Some(outcome) = coordinator.complete(request, false)
+            && sender.send(outcome).is_err()
+        {
+            break;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::{
         fs,
         sync::atomic::{AtomicU64, Ordering},
-        time::UNIX_EPOCH,
+        time::{Duration, UNIX_EPOCH},
     };
 
     static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
@@ -817,5 +940,97 @@ mod tests {
         assert!(!state.failed(old, LoadError::Missing(path.clone())));
         assert!(state.failed(current, LoadError::Missing(path)));
         assert_eq!(state.visible(), Some(&source));
+    }
+
+    #[test]
+    fn coordinator_debounces_rapid_generations_and_drops_stale_completion() {
+        let root = temp_dir();
+        let path = root.join("doc.md");
+        fs::write(&path, "before").unwrap();
+        let source = load_source(&path, false).unwrap();
+        let mut coordinator = ReloadCoordinator::new(&path).unwrap();
+        coordinator.seed(source);
+        fs::write(&path, "first replacement").unwrap();
+        let first = coordinator.poll(UNIX_EPOCH).unwrap();
+        fs::write(&path, "second replacement").unwrap();
+        let second = coordinator
+            .poll(UNIX_EPOCH + Duration::from_millis(25))
+            .unwrap();
+        assert!(first.is_none());
+        assert!(second.is_none());
+        let ready = coordinator
+            .poll(UNIX_EPOCH + RELOAD_DEBOUNCE + Duration::from_millis(25))
+            .unwrap()
+            .unwrap();
+        let stale = ReloadRequest {
+            generation: Generation::new(ready.generation.get() - 1).unwrap(),
+        };
+        assert!(coordinator.complete(stale, false).is_none());
+        assert!(matches!(
+            coordinator.complete(ready, false),
+            Some(ReloadOutcome::Ready { source, .. }) if source.source == "second replacement"
+        ));
+    }
+
+    #[test]
+    fn coordinator_preserves_last_good_on_delete_and_retries_reappearance() {
+        let root = temp_dir();
+        let path = root.join("doc.md");
+        fs::write(&path, "before").unwrap();
+        let source = load_source(&path, false).unwrap();
+        let mut coordinator = ReloadCoordinator::new(&path).unwrap();
+        coordinator.seed(source.clone());
+        fs::remove_file(&path).unwrap();
+        let now = UNIX_EPOCH + Duration::from_secs(1);
+        assert!(coordinator.poll(now).unwrap().is_none());
+        let deleted = coordinator.poll(now + RELOAD_DEBOUNCE).unwrap().unwrap();
+        assert!(matches!(
+            coordinator.complete(deleted, false),
+            Some(ReloadOutcome::Failed { .. })
+        ));
+        assert_eq!(coordinator.state().visible(), Some(&source));
+
+        fs::write(&path, "after reappearance").unwrap();
+        let reappeared = coordinator.poll(now + Duration::from_secs(1)).unwrap();
+        assert!(reappeared.is_none());
+        let reappeared = coordinator
+            .poll(now + Duration::from_secs(1) + RELOAD_DEBOUNCE)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            coordinator.complete(reappeared, false),
+            Some(ReloadOutcome::Ready { source, .. }) if source.source == "after reappearance"
+        ));
+    }
+
+    #[test]
+    fn coordinator_treats_empty_source_and_atomic_replacement_as_success() {
+        let root = temp_dir();
+        let path = root.join("doc.md");
+        fs::write(&path, "before").unwrap();
+        let source = load_source(&path, false).unwrap();
+        let mut coordinator = ReloadCoordinator::new(&path).unwrap();
+        coordinator.seed(source);
+        fs::write(&path, "").unwrap();
+        let now = UNIX_EPOCH + Duration::from_secs(1);
+        coordinator.poll(now).unwrap();
+        let request = coordinator.poll(now + RELOAD_DEBOUNCE).unwrap().unwrap();
+        assert!(matches!(
+            coordinator.complete(request, false),
+            Some(ReloadOutcome::Ready { source, .. }) if source.is_empty()
+        ));
+
+        let replacement = root.join("replacement.md");
+        fs::write(&replacement, "atomically replaced").unwrap();
+        fs::rename(replacement, &path).unwrap();
+        coordinator.poll(now + Duration::from_secs(1)).unwrap();
+        let request = coordinator
+            .poll(now + Duration::from_secs(1) + RELOAD_DEBOUNCE)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            coordinator.complete(request, false),
+            Some(ReloadOutcome::Ready { source, .. }) if source.source == "atomically replaced"
+        ));
     }
 }

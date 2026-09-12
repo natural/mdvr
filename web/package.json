@@ -4,6 +4,19 @@
   "type": "module",
   "packageManager": "bun@1.4.0",
   "scripts": {
-    "build": "bun build ./index.html --outdir dist --minify"
+    "build": "bun build ./index.html --outdir dist --minify && bun -e \"const p='dist/index.html'; await Bun.write(p, (await Bun.file(p).text()).replaceAll(' crossorigin', ''));\""
+  },
+  "dependencies": {
+    "dompurify": "^3.4.15",
+    "highlight.js": "^11.12.0",
+    "katex": "^0.18.7",
+    "markdown-it": "^15.0.2",
+    "markdown-it-footnote": "^4.0.0",
+    "markdown-it-task-lists": "^2.1.1",
+    "mermaid": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/dompurify": "^3.2.0",
+    "@types/markdown-it": "^14.2.0"
   }
 }

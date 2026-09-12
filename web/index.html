@@ -3,131 +3,98 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; img-src 'none'; media-src 'none'; object-src 'none'; script-src 'nonce-mdvr-fixture'; style-src 'nonce-mdvr-fixture'; worker-src 'none'">
-    <title>mdvr offline document fixture</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; img-src 'self' blob:; media-src 'none'; object-src 'none'; script-src 'self' 'nonce-mdvr-fixture'; style-src 'self' 'nonce-mdvr-fixture'; worker-src 'none'">
+    <title>mdvr document</title>
     <style nonce="mdvr-fixture">
-      :root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
-      body { margin: 0; padding: 2rem; max-width: 58rem; color: CanvasText; background: Canvas; }
-      header { border-bottom: 1px solid GrayText; margin-bottom: 1.5rem; padding-bottom: 1rem; }
-      h1, h2 { line-height: 1.2; }
-      code, pre { font-family: ui-monospace, SFMono-Regular, monospace; }
-      pre { overflow: auto; padding: 1rem; background: color-mix(in srgb, CanvasText 8%, Canvas); }
-      button, input { font: inherit; margin: .25rem; padding: .35rem .55rem; }
-      .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
-      .status { min-height: 1.5em; color: GrayText; }
-      [data-searchable].search-match { outline: 2px solid Highlight; outline-offset: .25rem; }
-      [data-searchable].search-current { background: color-mix(in srgb, Highlight 22%, Canvas); }
-      .placeholder { border-left: .3rem solid GrayText; padding-left: 1rem; }
+      :root { color-scheme: light dark; font: 16px/1.6 system-ui, sans-serif; }
+      body { margin: 0; background: Canvas; color: CanvasText; }
     </style>
   </head>
   <body>
-    <header>
-      <p><strong>Offline deterministic fixture</strong></p>
-      <h1>Document interaction hooks</h1>
-      <p>This fixture is static. It does not parse Markdown or render production HTML, Mermaid, or TeX.</p>
-      <div class="toolbar" data-hook="search">
-        <label for="search">Search fixture</label>
-        <input id="search" type="search" autocomplete="off" placeholder="literal, case-insensitive">
-        <button type="button" data-action="previous">Previous</button>
-        <button type="button" data-action="next">Next</button>
-      </div>
-      <div class="status" role="status" aria-live="polite" data-status>Search hook ready. No native bridge exposed.</div>
-    </header>
-
-    <main>
-      <section class="placeholder" data-searchable data-placeholder="html">
-        <h2>HTML placeholder</h2>
-        <p>Trusted fixture text stands in for sanitized HTML output. Parser and sanitizer are not implemented here.</p>
-        <pre><code>&lt;em&gt;HTML source placeholder&lt;/em&gt;</code></pre>
-      </section>
-
-      <section class="placeholder" data-searchable data-placeholder="code">
-        <h2>Code placeholder</h2>
-        <p>Exact source is kept in one selectable code block.</p>
-        <pre><code data-code>fn deterministic_fixture() -&gt; bool {
-    true
-}</code></pre>
-        <button type="button" data-action="select-code">Select code</button>
-        <button type="button" data-action="copy-code">Copy code</button>
-      </section>
-
-      <section class="placeholder" data-searchable data-placeholder="mermaid">
-        <h2>Mermaid placeholder</h2>
-        <p>Source is displayed as text; no diagram grammar or layout engine runs.</p>
-        <pre><code>graph TD
-    A[offline source] --&gt; B[placeholder]</code></pre>
-      </section>
-
-      <section class="placeholder" data-searchable data-placeholder="tex">
-        <h2>TeX placeholder</h2>
-        <p>Source is displayed as text; no math parser or typesetter runs.</p>
-        <pre><code>\\(E = mc^2\\)</code></pre>
-      </section>
-    </main>
-
+    <main id="document" class="reader" aria-live="polite">Loading document…</main>
     <script nonce="mdvr-fixture">
       (() => {
-        const status = document.querySelector('[data-status]');
-        const search = document.querySelector('#search');
-        const sections = [...document.querySelectorAll('[data-searchable]')];
-        let matches = [];
-        let cursor = -1;
-
-        const announce = (message) => { status.textContent = message; };
-        const showCurrent = () => {
-          sections.forEach((section) => section.classList.remove('search-current'));
-          if (cursor < 0 || !matches.length) return;
-          matches[cursor].classList.add('search-current');
-          matches[cursor].scrollIntoView({ block: 'nearest' });
-          announce(`Search hook: ${cursor + 1} of ${matches.length} matching fixture sections.`);
+        let nextRequestId = 1;
+        const validBridgeAction = (action) => {
+          if (!action || typeof action !== 'object' || typeof action.kind !== 'string') return false;
+          if (action.kind === 'select_all') return Object.keys(action).length === 1;
+          if (action.kind === 'copy') return action.payload && Object.keys(action).length === 2 && action.payload.kind === 'code';
+          if (action.kind !== 'search' || !action.payload || Object.keys(action).length !== 2) return false;
+          const { kind, payload } = action.payload;
+          if (kind === 'next' || kind === 'previous') return Object.keys(action.payload).length === 1;
+          return kind === 'open' && payload && typeof payload.query === 'string' && typeof payload.case_sensitive === 'boolean' && Object.keys(payload).length === 2;
         };
-        const updateSearch = () => {
-          const query = search.value.trim().toLowerCase();
-          sections.forEach((section) => section.classList.remove('search-match', 'search-current'));
-          matches = query ? sections.filter((section) => section.textContent.toLowerCase().includes(query)) : [];
-          cursor = matches.length ? 0 : -1;
-          matches.forEach((section) => section.classList.add('search-match'));
-          if (!query) announce('Search hook ready.');
-          else if (!matches.length) announce('Search hook: no matching fixture sections.');
-          else showCurrent();
-        };
-        const moveSearch = (step) => {
-          if (!matches.length) return;
-          cursor = (cursor + step + matches.length) % matches.length;
-          showCurrent();
-        };
-        const selectCode = () => {
-          const code = document.querySelector('[data-code]');
-          const selection = window.getSelection();
-          const range = document.createRange();
-          range.selectNodeContents(code);
-          selection.removeAllRanges();
-          selection.addRange(range);
-          announce('Selection hook: code selected.');
-        };
-        const copyCode = () => {
-          const code = document.querySelector('[data-code]').textContent;
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(code).then(
-              () => announce('Copy hook completed.'),
-              () => announce('Copy hook invoked; clipboard denied by host.')
-            );
-            return;
+        const postNativeAction = (action) => {
+          if (!validBridgeAction(action)) return false;
+          const handler = window.webkit?.messageHandlers?.mdvr;
+          if (!handler || typeof handler.postMessage !== 'function') return false;
+          const envelope = {
+            revision: 1,
+            message: {
+              kind: 'action',
+              payload: { request: nextRequestId, document: null, generation: null, action },
+            },
+          };
+          nextRequestId = nextRequestId === Number.MAX_SAFE_INTEGER ? 1 : nextRequestId + 1;
+          try {
+            handler.postMessage(JSON.stringify(envelope));
+            return true;
+          } catch {
+            return false;
           }
-          selectCode();
-          announce(document.execCommand('copy') ? 'Copy hook completed.' : 'Copy hook invoked; clipboard unavailable in fixture.');
         };
-
-        search.addEventListener('input', updateSearch);
-        search.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter') { event.preventDefault(); moveSearch(event.shiftKey ? -1 : 1); }
-          if (event.key === 'Escape') { search.value = ''; updateSearch(); }
+        let navigationContext = null;
+        const validNavigationTarget = (target) => {
+          if (!target || typeof target !== 'object' || Object.keys(target).length !== 1) return false;
+          const [kind] = Object.keys(target);
+          const payload = target[kind];
+          return ['anchor', 'markdown', 'http', 'mailto', 'local_file'].includes(kind) && payload && typeof payload === 'object' && Object.keys(payload).length === 1 && typeof payload[kind === 'anchor' ? 'value' : kind === 'http' || kind === 'mailto' ? 'url' : 'path'] === 'string' && payload[kind === 'anchor' ? 'value' : kind === 'http' || kind === 'mailto' ? 'url' : 'path'].length > 0;
+        };
+        const postNativeNavigation = (target) => {
+          if (!navigationContext || !validNavigationTarget(target)) return false;
+          const envelope = {
+            revision: 1,
+            message: {
+              kind: 'navigation.request',
+              payload: { request: nextRequestId, ...navigationContext, target },
+            },
+          };
+          nextRequestId = nextRequestId === Number.MAX_SAFE_INTEGER ? 1 : nextRequestId + 1;
+          try {
+            window.webkit?.messageHandlers?.mdvr?.postMessage(JSON.stringify(envelope));
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        const navigationTarget = (href) => {
+          if (href.startsWith('#')) return { anchor: { value: href.slice(1) } };
+          if (/^https?:\/\//i.test(href)) return { http: { url: href } };
+          if (/^mailto:/i.test(href)) return { mailto: { url: href } };
+          const path = href.split(/[?#]/, 1)[0];
+          return /\.(?:md|markdown)$/i.test(path) ? { markdown: { path: href } } : { local_file: { path: href } };
+        };
+        document.addEventListener('click', (event) => {
+          if (!(event.target instanceof Element)) return;
+          const link = event.target.closest('a[href]');
+          if (!link) return;
+          const href = link.getAttribute('href');
+          if (href && postNativeNavigation(navigationTarget(href))) event.preventDefault();
         });
-        document.querySelector('[data-action="previous"]').addEventListener('click', () => moveSearch(-1));
-        document.querySelector('[data-action="next"]').addEventListener('click', () => moveSearch(1));
-        document.querySelector('[data-action="select-code"]').addEventListener('click', selectCode);
-        document.querySelector('[data-action="copy-code"]').addEventListener('click', copyCode);
+        window.mdvrSetNavigationContext = (document, generation) => {
+          navigationContext = document && generation ? { document, generation } : null;
+        };
+        window.mdvrNavigateAnchor = (anchor) => document.getElementById(anchor)?.scrollIntoView();
+        const announce = () => {};
+        window.mdvrPostAction = postNativeAction;
+        window.mdvrPostNavigation = postNativeNavigation;
+        window.mdvrSearchAction = (query, case_sensitive = false) => postNativeAction({ kind: 'search', payload: { kind: 'open', payload: { query, case_sensitive } } });
+        window.mdvrMoveSearch = (step) => postNativeAction({ kind: 'search', payload: { kind: step < 0 ? 'previous' : 'next' } });
+        window.mdvrCopyCode = () => postNativeAction({ kind: 'copy', payload: { kind: 'code' } });
+        window.mdvrSelectAll = () => postNativeAction({ kind: 'select_all' });
+        announce('Renderer ready.');
       })();
     </script>
+    <script nonce="mdvr-fixture" type="module" src="./src/main.ts"></script>
   </body>
 </html>

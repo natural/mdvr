@@ -1,15 +1,58 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: var(--reader-color-scheme, light dark);
+  --reader-background: Canvas;
   --reader-text: CanvasText;
   --reader-muted: GrayText;
   --reader-code: color-mix(in srgb, CanvasText 7%, Canvas);
-  --reader-focus: Highlight;
+  --reader-accent: LinkText;
+  --reader-focus: var(--reader-accent);
+  --reader-scale: 1;
+  --reader-color-scheme: light dark;
+  --syntax-keyword-foreground: inherit;
+  --syntax-string-foreground: inherit;
+  --syntax-comment-foreground: inherit;
+  --syntax-number-foreground: inherit;
+  --syntax-function-foreground: inherit;
+  --syntax-type-foreground: inherit;
+  --syntax-operator-foreground: inherit;
+  --syntax-punctuation-foreground: inherit;
+  --syntax-keyword-background: transparent;
+  --syntax-string-background: transparent;
+  --syntax-comment-background: transparent;
+  --syntax-number-background: transparent;
+  --syntax-function-background: transparent;
+  --syntax-type-background: transparent;
+  --syntax-operator-background: transparent;
+  --syntax-punctuation-background: transparent;
+  --syntax-keyword-weight: normal;
+  --syntax-string-weight: normal;
+  --syntax-comment-weight: normal;
+  --syntax-number-weight: normal;
+  --syntax-function-weight: normal;
+  --syntax-type-weight: normal;
+  --syntax-operator-weight: normal;
+  --syntax-punctuation-weight: normal;
+  --syntax-keyword-style: normal;
+  --syntax-string-style: normal;
+  --syntax-comment-style: normal;
+  --syntax-number-style: normal;
+  --syntax-function-style: normal;
+  --syntax-type-style: normal;
+  --syntax-operator-style: normal;
+  --syntax-punctuation-style: normal;
   font:
-    16px / 1.6 system-ui,
+    calc(16px * var(--reader-scale)) / 1.6 system-ui,
     sans-serif;
 }
 
+html,
+body {
+  background: var(--reader-background);
+  color: var(--reader-text);
+}
+
 .reader {
+  background: var(--reader-background);
   color: var(--reader-text);
   max-width: 80ch;
   margin: 0 auto;
@@ -36,6 +79,66 @@
   background: var(--reader-code);
   tab-size: 2;
   white-space: pre;
+}
+
+.reader a {
+  color: var(--reader-accent);
+}
+
+.reader :where(.hljs-keyword) {
+  color: var(--syntax-keyword-foreground);
+  background: var(--syntax-keyword-background);
+  font-weight: var(--syntax-keyword-weight);
+  font-style: var(--syntax-keyword-style);
+}
+
+.reader :where(.hljs-string) {
+  color: var(--syntax-string-foreground);
+  background: var(--syntax-string-background);
+  font-weight: var(--syntax-string-weight);
+  font-style: var(--syntax-string-style);
+}
+
+.reader :where(.hljs-comment) {
+  color: var(--syntax-comment-foreground);
+  background: var(--syntax-comment-background);
+  font-weight: var(--syntax-comment-weight);
+  font-style: var(--syntax-comment-style);
+}
+
+.reader :where(.hljs-number) {
+  color: var(--syntax-number-foreground);
+  background: var(--syntax-number-background);
+  font-weight: var(--syntax-number-weight);
+  font-style: var(--syntax-number-style);
+}
+
+.reader :where(.hljs-title.function_) {
+  color: var(--syntax-function-foreground);
+  background: var(--syntax-function-background);
+  font-weight: var(--syntax-function-weight);
+  font-style: var(--syntax-function-style);
+}
+
+.reader :where(.hljs-type) {
+  color: var(--syntax-type-foreground);
+  background: var(--syntax-type-background);
+  font-weight: var(--syntax-type-weight);
+  font-style: var(--syntax-type-style);
+}
+
+.reader :where(.hljs-operator) {
+  color: var(--syntax-operator-foreground);
+  background: var(--syntax-operator-background);
+  font-weight: var(--syntax-operator-weight);
+  font-style: var(--syntax-operator-style);
+}
+
+.reader :where(.hljs-punctuation) {
+  color: var(--syntax-punctuation-foreground);
+  background: var(--syntax-punctuation-background);
+  font-weight: var(--syntax-punctuation-weight);
+  font-style: var(--syntax-punctuation-style);
 }
 
 .reader table {

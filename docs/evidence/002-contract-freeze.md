@@ -62,9 +62,17 @@ security evidence:
 | text scale | 50–300 percent | provisional appearance validation range |
 | heading level | 1–6 | Common Markdown shape; renderer compatibility still open |
 
-No numeric timeout, redirect count, DNS/private-address rule, debounce value,
-parser budget, or MIME policy is frozen here. `ack_timeout_ms` is carried as
-caller intent only; M0/native code must define and enforce timeout behavior.
+A-owned remote policy core freezes finite policy-data defaults outside wire
+serialization: URL 2 KiB, five redirects, 8 MiB response, and 10 second
+request timeout. It validates credential-free HTTP(S), rejects fragments and
+malformed/unsupported URLs, blocks private/loopback/link-local IP literals,
+and requires each redirect target to pass policy before redirect count is
+consumed. `ack_timeout_ms` remains caller intent only.
+
+This core performs no fetch, DNS resolution, socket connection, redirect
+following, or response read. DNS destination validation and validation/connect
+race protection remain explicit gaps, as does per-document remote consent.
+No MIME policy is frozen here.
 
 ## Fixtures
 
@@ -82,18 +90,26 @@ Ran in current checkout:
 
 ```text
 cargo fmt --check                         passed
-cargo test --locked                       passed (10 tests)
+cargo test --locked                       passed (70 tests)
 cargo clippy --locked --all-targets -- -D warnings
                                            passed
 ```
+
+## Current consumer integration status
+
+Revision 1 remains the shared contract for the native bridge, renderer, appearance,
+reload, and navigation integration. The files/navigation core is now wired into
+the app's navigation state at source level; live WebKit callback timing and
+visual navigation evidence remain open.
 
 ## M0 unresolved gate
 
 M0 is still blocked/open for real-app evidence: GPUI/WKWebView resize, focus,
 keyboard, close/reopen and activation; live CSP/navigation behavior; selection,
 copy and reload position preservation; production parsing/rendering; bridge
-runtime probes; canonical-path and symlink enforcement; outside-root grants;
-remote consent, DNS/redirect/private-network blocking and finite network
-limits; malicious HTML/SVG/Mermaid checks; dependency license audit; and
-universal Intel build feasibility. Therefore this slice is **not** an M1 pass,
-not a claim of native policy enforcement, and not release evidence.
+runtime probes; integration of the tested local canonical-path/symlink policy
+and outside-root grants; remote consent; DNS resolution/destination validation
+and validation/connect-race protection; transport and redirect following;
+malicious HTML/SVG/Mermaid checks; dependency license audit; and universal
+Intel build feasibility. Therefore this slice is **not an M1 pass, not a claim
+of complete native policy enforcement, and not release evidence.

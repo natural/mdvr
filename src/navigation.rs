@@ -267,15 +267,38 @@ impl NavigationState {
     }
 
     pub fn reload(&mut self) -> Result<LoadRequest, NavigationFailure> {
+        let (path, anchor, locator) = {
+            let current = self
+                .current
+                .as_ref()
+                .ok_or(NavigationFailure::NoCurrentDocument)?;
+            (
+                current.path.clone(),
+                current.anchor.clone(),
+                current.locator.clone(),
+            )
+        };
+        let generation = self.new_generation();
+        Ok(self.make_load_request_at(path, anchor, locator, LoadKind::Reload, generation))
+    }
+
+    /// Match reload worker generations so stale file results cannot replace newer views.
+    pub fn reload_at(&mut self, generation: Generation) -> Result<LoadRequest, NavigationFailure> {
         let current = self
             .current
             .as_ref()
             .ok_or(NavigationFailure::NoCurrentDocument)?;
-        Ok(self.make_load_request(
+        if generation.get() <= current.generation.get() || generation.get() <= self.next_generation
+        {
+            return Err(NavigationFailure::StaleCompletion);
+        }
+        self.next_generation = generation.get();
+        Ok(self.make_load_request_at(
             current.path.clone(),
             current.anchor.clone(),
             current.locator.clone(),
             LoadKind::Reload,
+            generation,
         ))
     }
 
@@ -377,6 +400,18 @@ impl NavigationState {
         locator: Locator,
         kind: LoadKind,
     ) -> LoadRequest {
+        let generation = self.new_generation();
+        self.make_load_request_at(path, anchor, locator, kind, generation)
+    }
+
+    fn make_load_request_at(
+        &mut self,
+        path: PathBuf,
+        anchor: Option<String>,
+        locator: Locator,
+        kind: LoadKind,
+        generation: Generation,
+    ) -> LoadRequest {
         let (source_document, source_generation) = {
             let current = self
                 .current
@@ -388,7 +423,7 @@ impl NavigationState {
             request: self.new_request_id(),
             source_document,
             source_generation,
-            generation: self.new_generation(),
+            generation,
             path,
             anchor,
             kind,

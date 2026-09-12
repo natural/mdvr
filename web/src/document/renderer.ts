@@ -1,10 +1,10 @@
-/**
- * Dependency-neutral document renderer core.
- *
- * This is deliberately a bounded scaffold, not CommonMark or a syntax
- * highlighter. Approved parser/highlighter/diagram/math assets can replace
- * individual hooks without changing the document, locator, or generation API.
- */
+import MarkdownIt from "markdown-it";
+import footnote from "markdown-it-footnote";
+import taskLists from "markdown-it-task-lists";
+import DOMPurify from "dompurify";
+import hljs from "highlight.js/lib/common";
+import katex from "katex";
+import mermaid from "mermaid";
 
 export const MAX_SOURCE_BYTES = 10 * 1024 * 1024;
 export const DEFAULT_RENDER_BUDGET = {
@@ -29,26 +29,22 @@ export interface Heading {
   text: string;
   blockId: string;
 }
-
 export interface CodeBlock {
   blockId: string;
   language: string | null;
   source: string;
-  highlighted: false;
+  highlighted: boolean;
 }
-
 export interface ResourceRequest {
   kind: "image" | "svg-reference";
   reference: string;
   alt?: string;
 }
-
 export interface RenderError {
   kind: "source" | "mermaid" | "math";
   message: string;
   blockId?: string;
 }
-
 export interface RenderBlock {
   id: string;
   kind: BlockKind;
@@ -56,7 +52,6 @@ export interface RenderBlock {
   html: string;
   code?: CodeBlock;
 }
-
 export interface RenderModel {
   source: string;
   generation?: number;
@@ -67,7 +62,6 @@ export interface RenderModel {
   resources: ResourceRequest[];
   errors: RenderError[];
 }
-
 export interface RenderOptions {
   generation?: number;
   resolveResource?: (
@@ -76,14 +70,12 @@ export interface RenderOptions {
   ) => string | null;
   budget?: Partial<typeof DEFAULT_RENDER_BUDGET>;
 }
-
 export interface Locator {
   heading?: string;
   block?: string;
   offset?: number;
   fallback?: "nearest_heading" | "document_start";
 }
-
 export interface RestoredLocator {
   blockId: string | null;
   offset: number;
@@ -94,7 +86,6 @@ export interface RestoredLocator {
     | "document_start"
     | "empty";
 }
-
 export interface SelectionState {
   startBlockId: string;
   startOffset: number;
@@ -102,14 +93,12 @@ export interface SelectionState {
   endOffset: number;
   text: string;
 }
-
 export interface SearchMatch {
   blockId: string;
   index: number;
   length: number;
   text: string;
 }
-
 export interface RenderedAsync<T> {
   generation: number;
   value: T;
@@ -166,17 +155,14 @@ const LANGUAGE_ALIASES: Record<string, string> = {
 export const SUPPORTED_LANGUAGES = [
   ...new Set(Object.values(LANGUAGE_ALIASES)),
 ];
-
 export function normalizeLanguage(value: string): string | null {
-  const key = value.trim().toLowerCase();
-  return LANGUAGE_ALIASES[key] ?? null;
+  return LANGUAGE_ALIASES[value.trim().toLowerCase()] ?? null;
 }
 
 export function slugifyHeading(
   value: string,
   used = new Map<string, number>(),
 ): string {
-  // GitHub keeps Unicode letters/numbers and ASCII hyphens, but drops punctuation.
   const base = value
     .replace(/<[^>]*>/g, "")
     .toLocaleLowerCase()
@@ -198,21 +184,23 @@ function escapeHtml(value: string): string {
       ]!,
   );
 }
-
 function escapeAttribute(value: string): string {
   return escapeHtml(value.replace(/[\u0000-\u001f\u007f]/g, ""));
 }
-
 function safeUrl(value: string): string | null {
   const url = value.trim();
-  if (!url || /^(?:javascript|vbscript|data|file|gopher):/i.test(url))
+  if (
+    !url ||
+    /^\/\//.test(url) ||
+    /^(?:javascript|vbscript|data|file|gopher):/i.test(url)
+  )
     return null;
   if (/^[a-z][a-z\d+.-]*:/i.test(url) && !/^(?:https?|mailto):/i.test(url))
     return null;
   return url;
 }
 
-const ALLOWED_TAGS = new Set([
+const ALLOWED_TAGS = [
   "a",
   "abbr",
   "b",
@@ -232,6 +220,7 @@ const ALLOWED_TAGS = new Set([
   "hr",
   "i",
   "img",
+  "input",
   "kbd",
   "li",
   "ol",
@@ -255,7 +244,29 @@ const ALLOWED_TAGS = new Set([
   "tr",
   "u",
   "ul",
-]);
+];
+const ALLOWED_ATTR = [
+  "alt",
+  "title",
+  "id",
+  "class",
+  "colspan",
+  "rowspan",
+  "scope",
+  "href",
+  "src",
+  "data-block-id",
+  "data-searchable",
+  "data-language",
+  "data-highlighted",
+  "data-mdvr-resource",
+  "data-renderer",
+  "role",
+  "aria-label",
+  "type",
+  "checked",
+  "disabled",
+];
 const DROP_TAGS =
   /<(?:script|style|iframe|frame|frameset|form|object|embed|applet|base|link|meta|template)\b[^>]*>[\s\S]*?(?:<\/(?:script|style|iframe|frame|frameset|form|object|embed|applet|base|link|meta|template)\s*>|$)/gi;
 const DROP_SINGLE_TAGS =
@@ -266,13 +277,10 @@ export interface SanitizerOptions {
     reference: string,
     kind: "image" | "svg-reference",
   ) => string | null;
+  approvedUrls?: ReadonlySet<string>;
 }
 
-/** Remove executable/document-level HTML. Resource URLs only come from policy callback. */
-export function sanitizeHtml(
-  input: string,
-  options: SanitizerOptions = {},
-): string {
+function fallbackSanitize(input: string, options: SanitizerOptions): string {
   const clean = input
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(DROP_TAGS, "")
@@ -281,12 +289,12 @@ export function sanitizeHtml(
     /<\s*(\/?)\s*([a-z][\w:-]*)([^>]*)>/gi,
     (_whole, close: string, name: string, rawAttrs: string) => {
       const tag = name.toLowerCase();
-      if (!ALLOWED_TAGS.has(tag)) return "";
+      if (!ALLOWED_TAGS.includes(tag)) return "";
       if (close) return `</${tag}>`;
       const attrs: string[] = [];
-      const attributePattern =
-        /([:\w-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
-      for (const match of rawAttrs.matchAll(attributePattern)) {
+      for (const match of rawAttrs.matchAll(
+        /([:\w-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g,
+      )) {
         const attribute = match[1]!.toLowerCase();
         const value = match[2] ?? match[3] ?? match[4] ?? "";
         if (
@@ -301,20 +309,16 @@ export function sanitizeHtml(
           continue;
         }
         if (
-          ![
-            "alt",
-            "title",
-            "id",
-            "colspan",
-            "rowspan",
-            "scope",
-            "href",
-            "src",
-          ].includes(attribute)
+          attribute === "type" &&
+          tag === "input" &&
+          value.toLowerCase() !== "checkbox"
         )
           continue;
+        if (![...ALLOWED_ATTR, "open"].includes(attribute)) continue;
         if (attribute === "src") {
-          const approved = options.resolveResource?.(value, "image");
+          const approved = options.approvedUrls?.has(value)
+            ? value
+            : options.resolveResource?.(value, "image");
           if (approved) attrs.push(`src="${escapeAttribute(approved)}"`);
           continue;
         }
@@ -323,246 +327,147 @@ export function sanitizeHtml(
           if (approved) attrs.push(`href="${escapeAttribute(approved)}"`);
           continue;
         }
-        attrs.push(`${attribute}="${escapeAttribute(value)}"`);
+        attrs.push(
+          attribute === "disabled" || attribute === "checked"
+            ? attribute
+            : `${attribute}="${escapeAttribute(value)}"`,
+        );
       }
       return `<${tag}${attrs.length ? ` ${attrs.join(" ")}` : ""}>`;
     },
   );
 }
 
-function decodeEntities(value: string): string {
-  return value.replace(
-    /&(?:amp|lt|gt|quot|#39|nbsp);/g,
-    (entity) =>
-      ({
-        "&amp;": "&",
-        "&lt;": "<",
-        "&gt;": ">",
-        "&quot;": '"',
-        "&#39;": "'",
-        "&nbsp;": " ",
-      })[entity]!,
+/** DOMPurify is production sanitizer; fallback keeps pure Bun parser tests deterministic. */
+export function sanitizeHtml(
+  input: string,
+  options: SanitizerOptions = {},
+): string {
+  if (typeof document === "undefined" || typeof window === "undefined")
+    return fallbackSanitize(input, options);
+  const routed = input.replace(
+    /(<img\b[^>]*\bsrc\s*=\s*)(["'])([^"']+)\2/gi,
+    (whole, prefix, quote, reference) => {
+      const approved = options.approvedUrls?.has(reference)
+        ? reference
+        : options.resolveResource?.(reference, "image");
+      return approved
+        ? `${prefix}${quote}${escapeAttribute(approved)}${quote}`
+        : whole.replace(/\bsrc\s*=\s*(?:"[^"]*"|'[^']*')/i, "");
+    },
   );
+  return DOMPurify.sanitize(routed, {
+    ALLOWED_TAGS,
+    ALLOWED_ATTR,
+    FORBID_TAGS: ["style", "script", "iframe", "form", "object", "embed"],
+    FORBID_ATTR: ["style"],
+  });
+}
+
+function sanitizeGeneratedSvg(input: string): string {
+  const safe = input
+    .replace(
+      /<\/?(?:script|style)\b[^>]*>[\s\S]*?(?:<\/\s*(?:script|style)\s*>|$)/gi,
+      "",
+    )
+    .replace(
+      /\s(?:on\w+|href|xlink:href)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi,
+      "",
+    );
+  if (typeof document === "undefined" || typeof window === "undefined")
+    return safe;
+  return DOMPurify.sanitize(safe, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    FORBID_TAGS: ["script", "style"],
+    FORBID_ATTR: ["style", "href", "xlink:href"],
+  });
 }
 
 function plainText(value: string): string {
-  return decodeEntities(
-    value
-      .replace(/`([^`]+)`/g, "$1")
-      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-      .replace(/\*\*|__|~~|[*_]/g, "")
-      .replace(/<[^>]*>/g, ""),
-  );
+  return value
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/\*\*|__|~~|[*_]/g, "")
+    .replace(/<[^>]*>/g, "")
+    .replace(
+      /&(?:amp|lt|gt|quot|#39|nbsp);/g,
+      (entity) =>
+        ({
+          "&amp;": "&",
+          "&lt;": "<",
+          "&gt;": ">",
+          "&quot;": '"',
+          "&#39;": "'",
+          "&nbsp;": " ",
+        })[entity]!,
+    );
 }
 
-interface InlineResult {
-  html: string;
-  text: string;
-  resources: ResourceRequest[];
+interface MathPart {
+  source: string;
+  display: boolean;
 }
-
-function renderInline(
-  value: string,
-  options: RenderOptions,
-  errors: RenderError[],
-  blockId: string,
-): InlineResult {
-  const tokens: Array<{
-    html: string;
-    text: string;
-    resource?: ResourceRequest;
-  }> = [];
-  const protect = (html: string, text: string, resource?: ResourceRequest) => {
-    const marker = `\u0000${tokens.length}\u0000`;
-    tokens.push({ html, text, resource });
-    return marker;
-  };
-  const input = value.replace(
-    /`([^`\n]+)`|!\[([^\]]*)\]\(([^)\s]+)(?:\s+["']([^"']*)["'])?\)|\[([^\]]+)\]\(([^)\s]+)(?:\s+["']([^"']*)["'])?\)|<((?:https?:\/\/|mailto:)[^>]+)>|(<\/?[a-z][^>]*>)/gi,
-    (
-      _whole,
-      code,
-      imageAlt,
-      imageRef,
-      _imageTitle,
-      linkText,
-      linkRef,
-      _linkTitle,
-      autoLink,
-      rawTag,
-    ) => {
-      if (code !== undefined)
-        return protect(`<code>${escapeHtml(code)}</code>`, code);
-      if (imageRef !== undefined) {
-        const resource: ResourceRequest = {
-          kind: "image",
-          reference: imageRef,
-          alt: imageAlt ?? "",
-        };
-        const approved = options.resolveResource?.(imageRef, "image");
-        const html = approved
-          ? `<img src="${escapeAttribute(approved)}" alt="${escapeAttribute(imageAlt ?? "")}">`
-          : `<span class="image-placeholder" role="img" aria-label="${escapeAttribute(imageAlt ?? "Image unavailable")}" data-mdvr-resource="${escapeAttribute(imageRef)}">[image: ${escapeHtml(imageAlt ?? "Image unavailable")}]</span>`;
-        return protect(html, imageAlt ?? "", resource);
+const MATH_START = "\uE000MDVR_MATH_";
+const MATH_END = "\uE001";
+function mathMarker(index: number): string {
+  return `${MATH_START}${index}${MATH_END}`;
+}
+function protectMath(source: string): {
+  source: string;
+  parts: MathPart[];
+  malformed: boolean;
+} {
+  const lines = source.replace(/\r\n?/g, "\n").split("\n");
+  const parts: MathPart[] = [];
+  let inFence = false;
+  let malformed = false;
+  const output: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    const opening = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (opening) {
+      inFence = !inFence;
+      output.push(line);
+      continue;
+    }
+    if (inFence) {
+      output.push(line);
+      continue;
+    }
+    if (/^\s*\$\$\s*$/.test(line)) {
+      const body: string[] = [];
+      i += 1;
+      while (i < lines.length && !/^\s*\$\$\s*$/.test(lines[i]!))
+        body.push(lines[i++]!);
+      if (i === lines.length) {
+        malformed = true;
+        output.push(line, ...body);
+        break;
       }
-      if (linkRef !== undefined) {
-        const href = safeUrl(linkRef);
-        return protect(
-          href
-            ? `<a href="${escapeAttribute(href)}">${renderInline(linkText, options, errors, blockId).html}</a>`
-            : escapeHtml(linkText),
-          plainText(linkText),
-        );
-      }
-      if (autoLink !== undefined)
-        return protect(
-          `<a href="${escapeAttribute(autoLink)}">${escapeHtml(autoLink)}</a>`,
-          autoLink,
-        );
-      if (rawTag !== undefined)
-        return protect(
-          sanitizeHtml(rawTag, { resolveResource: options.resolveResource }),
-          plainText(rawTag),
-        );
-      return _whole;
-    },
-  );
-
-  let html = escapeHtml(input);
-  if ((value.match(/\$\$/g)?.length ?? 0) % 2 === 1)
-    errors.push({
-      kind: "math",
-      message: "Math input is incomplete.",
-      blockId,
-    });
-  html = html.replace(
-    /\$\$([^$\n]+)\$\$|\$([^$\n]+)\$/g,
-    (_whole, display, inline) => {
-      const source = display ?? inline;
-      const result = renderMath(
-        source,
-        Boolean(display),
-        options.budget?.maxMathBytes ?? DEFAULT_RENDER_BUDGET.maxMathBytes,
-      );
-      if (result.status === "error")
-        errors.push({
-          kind: "math",
-          message: result.message ?? "Invalid math input.",
-          blockId,
-        });
-      return protect(result.html, source);
-    },
-  );
-  html = html.replace(
-    /\*\*([^*\n]+)\*\*|__([^_\n]+)__|~~([^~\n]+)~~|\*([^*\n]+)\*|_([^_\n]+)_/g,
-    (_whole, strongA, strongB, strike, emA, emB) => {
-      const text = strongA ?? strongB ?? strike ?? emA ?? emB;
-      const tag =
-        strongA !== undefined || strongB !== undefined
-          ? "strong"
-          : strike === undefined
-            ? "em"
-            : "del";
-      return `<${tag}>${text}</${tag}>`;
-    },
-  );
-  html = html.replace(
-    /\u0000(\d+)\u0000/g,
-    (_whole, index) => tokens[Number(index)]!.html,
-  );
-  const resources = tokens.flatMap((token) =>
-    token.resource ? [token.resource] : [],
-  );
-  return { html, text: plainText(value), resources };
-}
-
-function blockShell(tag: string, id: string, body: string): string {
-  return `<${tag} data-block-id="${escapeAttribute(id)}" data-searchable>${body}</${tag}>`;
-}
-
-function tableCells(line: string): string[] {
-  const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
-  return trimmed
-    .split(/(?<!\\)\|/)
-    .map((cell) => cell.replace(/\\\|/g, "|").trim());
-}
-
-function isTableDivider(line: string): boolean {
-  return (
-    tableCells(line).length > 0 &&
-    tableCells(line).every((cell) => /^:?-{3,}:?$/.test(cell))
-  );
-}
-
-function renderTable(
-  lines: string[],
-  blockId: string,
-  options: RenderOptions,
-): { html: string; text: string; resources: ResourceRequest[] } {
-  const rows = lines.map(tableCells);
-  const header = rows[0] ?? [];
-  const body = rows.slice(2);
-  const errors: RenderError[] = [];
-  const resources: ResourceRequest[] = [];
-  const renderCell = (cell: string, tag: "th" | "td") => {
-    const rendered = renderInline(cell, options, errors, blockId);
-    resources.push(...rendered.resources);
-    return `<${tag}>${rendered.html}</${tag}>`;
-  };
-  const html = `<table><thead><tr>${header.map((cell) => renderCell(cell, "th")).join("")}</tr></thead><tbody>${body.map((row) => `<tr>${row.map((cell) => renderCell(cell, "td")).join("")}</tr>`).join("")}</tbody></table>`;
-  return {
-    html: blockShell("div", blockId, html),
-    text: rows.map((row) => row.join(" ")).join("\n"),
-    resources,
-  };
-}
-
-export interface DiagramResult {
-  status: "pending" | "error";
-  html: string;
-  message?: string;
-}
-
-export function renderMermaid(
-  source: string,
-  limits = DEFAULT_RENDER_BUDGET,
-): DiagramResult {
-  if (
-    new TextEncoder().encode(source).byteLength > limits.maxDiagramBytes ||
-    source.split("\n").length > limits.maxDiagramLines
-  ) {
-    return {
-      status: "error",
-      html: `<div class="render-error">Mermaid input exceeds finite render budget.</div>`,
-      message: "Mermaid input exceeds finite render budget.",
-    };
-  }
-  if (
-    !/\b(?:flowchart|graph|sequenceDiagram|stateDiagram(?:-v2)?)\b/i.test(
-      source,
+      const index = parts.push({ source: body.join("\n"), display: true }) - 1;
+      output.push(mathMarker(index));
+      continue;
+    }
+    const replaced = line.replace(
+      /\$\$([^$\n]+)\$\$|(?<!\\)\$([^$\n]+)(?<!\\)\$/g,
+      (_whole, display, inline) => {
+        const index =
+          parts.push({
+            source: display ?? inline,
+            display: display !== undefined,
+          }) - 1;
+        return mathMarker(index);
+      },
+    );
+    if (
+      (replaced.match(/(?<!\\)\$\$/g) ?? []).length % 2 ||
+      (replaced.match(/(?<!\\)(?<!\$)\$(?!\$)/g) ?? []).length % 2
     )
-  ) {
-    return {
-      status: "error",
-      html: `<div class="render-error">Mermaid input has no supported diagram declaration.</div>`,
-      message: "Mermaid input has no supported diagram declaration.",
-    };
+      malformed = true;
+    output.push(replaced);
   }
-  if (
-    /-->\s*(?:$|\n)/m.test(source) ||
-    /\b(?:flowchart|graph)\b[^\n]*\n?\s*[A-Za-z0-9_-]+\s*-->\s*$/m.test(source)
-  ) {
-    return {
-      status: "error",
-      html: `<div class="render-error">Mermaid edge is missing its target.</div>`,
-      message: "Mermaid edge is missing its target.",
-    };
-  }
-  return {
-    status: "pending",
-    html: `<div class="diagram-pending" data-renderer="mermaid">Mermaid diagram pending approved bundled renderer.</div>`,
-  };
+  return { source: output.join("\n"), parts, malformed };
 }
 
 export interface MathResult {
@@ -570,41 +475,287 @@ export interface MathResult {
   html: string;
   message?: string;
 }
-
 export function renderMath(
   source: string,
   display: boolean,
   maxBytes = DEFAULT_RENDER_BUDGET.maxMathBytes,
 ): MathResult {
-  if (new TextEncoder().encode(source).byteLength > maxBytes) {
+  if (new TextEncoder().encode(source).byteLength > maxBytes)
     return {
       status: "error",
       html: `<div class="render-error">Math input exceeds finite render budget.</div>`,
       message: "Math input exceeds finite render budget.",
     };
-  }
-  if (
-    (source.match(/\\/g) ?? []).length % 2 === 1 ||
-    /(?:^|[^\\])\$(?:$|[^$])/.test(source)
-  ) {
+  try {
+    const html = katex.renderToString(source, {
+      displayMode: display,
+      throwOnError: true,
+      output: "htmlAndMathml",
+      trust: false,
+    });
+    // Keep pending status for API compatibility: production completion is synchronous for bounded TeX.
+    return { status: "pending", html };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Invalid math input.";
     return {
       status: "error",
-      html: `<div class="render-error">Math input is incomplete.</div>`,
-      message: "Math input is incomplete.",
+      html: `<div class="render-error">${escapeHtml(message)}</div>`,
+      message,
     };
   }
-  const tag = display ? "div" : "span";
+}
+
+export interface DiagramResult {
+  status: "pending" | "error";
+  html: string;
+  message?: string;
+}
+export function renderMermaid(
+  source: string,
+  limits = DEFAULT_RENDER_BUDGET,
+): DiagramResult {
+  if (
+    new TextEncoder().encode(source).byteLength > limits.maxDiagramBytes ||
+    source.split("\n").length > limits.maxDiagramLines
+  )
+    return {
+      status: "error",
+      html: `<div class="render-error">Mermaid input exceeds finite render budget.</div>`,
+      message: "Mermaid input exceeds finite render budget.",
+    };
+  if (
+    !/\b(?:flowchart|graph|sequenceDiagram|stateDiagram(?:-v2)?)\b/i.test(
+      source,
+    )
+  )
+    return {
+      status: "error",
+      html: `<div class="render-error">Mermaid input has no supported diagram declaration.</div>`,
+      message: "Mermaid input has no supported diagram declaration.",
+    };
+  if (/-->\s*(?:$|\n)/m.test(source))
+    return {
+      status: "error",
+      html: `<div class="render-error">Mermaid edge is missing its target.</div>`,
+      message: "Mermaid edge is missing its target.",
+    };
   return {
     status: "pending",
-    html: `<${tag} class="math-pending" data-renderer="tex">TeX rendering pending approved bundled renderer.</${tag}>`,
+    html: `<div class="diagram-pending" data-renderer="mermaid">Mermaid diagram pending bundled renderer.</div>`,
   };
+}
+
+let mermaidConfigured = false;
+export async function renderMermaidAsync(
+  source: string,
+  id: string,
+  limits = DEFAULT_RENDER_BUDGET,
+): Promise<DiagramResult> {
+  const checked = renderMermaid(source, limits);
+  if (checked.status === "error") return checked;
+  try {
+    if (!mermaidConfigured) {
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "base",
+      });
+      mermaidConfigured = true;
+    }
+    const result = await mermaid.render(
+      `mdvr-mermaid-${id.replace(/[^a-z\d_-]/gi, "-")}`,
+      source,
+    );
+    return { status: "pending", html: sanitizeGeneratedSvg(result.svg) };
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Mermaid input could not be rendered.";
+    return {
+      status: "error",
+      html: `<div class="render-error">${escapeHtml(message)}</div>`,
+      message,
+    };
+  }
+}
+
+function marker(id: string): string {
+  return `<!--mdvr:${id}-->`;
+}
+function endMarker(): string {
+  return "<!--/mdvr-->";
+}
+function inlineText(token: any): string {
+  return (
+    token?.children
+      ?.map((child: any) =>
+        child.type === "image" ? (child.attrGet("alt") ?? "") : child.content,
+      )
+      .join("") ??
+    token?.content ??
+    ""
+  );
+}
+function tokenText(tokens: any[], start: number, end: number): string {
+  return tokens
+    .slice(start, end + 1)
+    .filter((token) => token.type === "inline")
+    .map(inlineText)
+    .join("\n")
+    .replace(/\n/g, " ")
+    .trim();
+}
+
+function makeMarkdown(
+  options: RenderOptions,
+  idByToken: WeakMap<object, string>,
+  math: MathPart[],
+  codeByToken: Map<object, CodeBlock>,
+  diagramByToken: Map<object, string>,
+) {
+  const md = new MarkdownIt({ html: true, linkify: true, breaks: false })
+    .use(footnote)
+    .use(taskLists, { enabled: false });
+  md.renderer.rules.softbreak = () => " ";
+  md.renderer.rules.heading_open = (tokens: any[], index: number) => {
+    const token = tokens[index]!;
+    return `${marker(idByToken.get(token) ?? "")}<${token.tag} id="${escapeAttribute(token.attrGet("id") ?? "section")}" data-block-id="${escapeAttribute(idByToken.get(token) ?? "")}" data-searchable>`;
+  };
+  md.renderer.rules.heading_close = (tokens: any[], index: number) =>
+    `</${tokens[index]!.tag}>${endMarker()}`;
+  for (const [open] of [
+    ["paragraph_open", "p"],
+    ["blockquote_open", "blockquote"],
+    ["bullet_list_open", "ul"],
+    ["ordered_list_open", "ol"],
+    ["table_open", "table"],
+  ] as const) {
+    md.renderer.rules[open] = (
+      tokens: any[],
+      index: number,
+      opts: any,
+      _env: any,
+      self: any,
+    ) => {
+      const token = tokens[index]!;
+      const id = idByToken.get(token);
+      if (!id) return self.renderToken(tokens, index, opts);
+      if (open === "table_open")
+        return `${marker(id)}<div data-block-id="${escapeAttribute(id)}" data-searchable>${self.renderToken(tokens, index, opts)}`;
+      token.attrSet("data-block-id", id);
+      token.attrSet("data-searchable", "");
+      return `${marker(id)}${self.renderToken(tokens, index, opts)}`;
+    };
+    const closeType = open.replace("_open", "_close");
+    md.renderer.rules[closeType] = (
+      tokens: any[],
+      index: number,
+      opts: any,
+      _env: any,
+      self: any,
+    ) =>
+      `${self.renderToken(tokens, index, opts)}${open === "table_open" && tokens[index]!.level === 0 ? "</div>" : ""}${tokens[index]!.level === 0 ? endMarker() : ""}`;
+  }
+  md.renderer.rules.html_block = (tokens: any[], index: number) =>
+    `${marker(idByToken.get(tokens[index]!) ?? "")}${tokens[index]!.content}${endMarker()}`;
+  md.renderer.rules.footnote_block_open = (tokens: any[], index: number) =>
+    `${marker(idByToken.get(tokens[index]!) ?? "")}<section class="footnotes" data-block-id="${escapeAttribute(idByToken.get(tokens[index]!) ?? "")}" data-searchable><ol>`;
+  md.renderer.rules.footnote_block_close = () =>
+    `</ol></section>${endMarker()}`;
+  md.renderer.rules.paragraph_open = (
+    tokens: any[],
+    index: number,
+    opts: any,
+    _env: any,
+    self: any,
+  ) => {
+    const inline = tokens[index + 1];
+    if (
+      inline?.type === "inline" &&
+      /^\uE000MDVR_MATH_\d+\uE001$/.test(inline.content)
+    )
+      return "";
+    const token = tokens[index]!;
+    const id = idByToken.get(token);
+    if (!id) return self.renderToken(tokens, index, opts);
+    token.attrSet("data-block-id", id);
+    token.attrSet("data-searchable", "");
+    return `${marker(id)}${self.renderToken(tokens, index, opts)}`;
+  };
+  md.renderer.rules.paragraph_close = (tokens: any[], index: number) => {
+    if (tokens[index]!.hidden) return "";
+    const inline = tokens[index - 1];
+    if (
+      inline?.type === "inline" &&
+      /^\uE000MDVR_MATH_\d+\uE001$/.test(inline.content)
+    )
+      return "";
+    return `</p>${endMarker()}`;
+  };
+  md.renderer.rules.image = (
+    tokens: any[],
+    index: number,
+    _opts: any,
+    renderEnv: any,
+  ) => {
+    const token = tokens[index]!;
+    const reference = token.attrGet("src") ?? "";
+    const alt =
+      token.attrGet("alt") ||
+      token.content ||
+      token.children?.map((child: any) => child.content).join("") ||
+      "";
+    const request = { kind: "image" as const, reference, alt };
+    renderEnv.resources.push(request);
+    const approved = options.resolveResource?.(reference, "image");
+    if (approved) {
+      renderEnv.approvedUrls.add(approved);
+      return `<img src="${escapeAttribute(approved)}" alt="${escapeAttribute(alt)}">`;
+    }
+    return `<span class="image-placeholder" role="img" aria-label="${escapeAttribute(alt || "Image unavailable")}" data-mdvr-resource="${escapeAttribute(reference)}">[image: ${escapeHtml(alt || "Image unavailable")}]</span>`;
+  };
+  md.renderer.rules.fence = (
+    tokens: any[],
+    index: number,
+    _opts: any,
+    _renderEnv: any,
+  ) => {
+    const code = codeByToken.get(tokens[index]!)!;
+    const diagramId = diagramByToken.get(tokens[index]!);
+    if (diagramId)
+      return `${marker(code.blockId)}<div data-block-id="${escapeAttribute(code.blockId)}" data-searchable><pre class="mermaid-source"><code>${escapeHtml(code.source)}</code></pre>${renderMermaid(code.source, { ...DEFAULT_RENDER_BUDGET, ...options.budget }).html}</div>${endMarker()}`;
+    let content = escapeHtml(code.source);
+    if (code.highlighted && code.language)
+      content = hljs.highlight(code.source, {
+        language: code.language === "html" ? "xml" : code.language,
+        ignoreIllegals: true,
+      }).value;
+    return `${marker(code.blockId)}<pre data-block-id="${escapeAttribute(code.blockId)}" data-searchable><code class="language-${escapeAttribute(code.language ?? "text")}" data-language="${escapeAttribute(code.language ?? "")}" data-highlighted="${code.highlighted}">${content}</code></pre>${endMarker()}`;
+  };
+  md.renderer.rules.text = (tokens: any[], index: number) => {
+    const content = tokens[index]!.content;
+    return content.replace(
+      new RegExp(`${MATH_START}(\\d+)${MATH_END}`, "g"),
+      (_whole, value) => {
+        const part = math[Number(value)]!;
+        return renderMath(
+          part.source,
+          part.display,
+          options.budget?.maxMathBytes ?? DEFAULT_RENDER_BUDGET.maxMathBytes,
+        ).html;
+      },
+    );
+  };
+  return md;
 }
 
 export function renderDocument(
   source: string,
   options: RenderOptions = {},
 ): RenderModel {
-  if (new TextEncoder().encode(source).byteLength > MAX_SOURCE_BYTES) {
+  if (new TextEncoder().encode(source).byteLength > MAX_SOURCE_BYTES)
     return {
       source,
       generation: options.generation,
@@ -617,241 +768,256 @@ export function renderDocument(
         { kind: "source", message: "Source exceeds 10 MiB renderer budget." },
       ],
     };
-  }
-  const lines = source.replace(/\r\n?/g, "\n").split("\n");
-  const blocks: RenderBlock[] = [];
-  const headings: Heading[] = [];
-  const codeBlocks: CodeBlock[] = [];
-  const resources: ResourceRequest[] = [];
-  const errors: RenderError[] = [];
+  const prepared = protectMath(source);
+  const env: any = {
+    resources: [] as ResourceRequest[],
+    approvedUrls: new Set<string>(),
+  };
+  const md = new MarkdownIt({ html: true, linkify: true, breaks: false })
+    .use(footnote)
+    .use(taskLists, { enabled: false });
+  const tokens = md.parse(prepared.source, env);
   const usedSlugs = new Map<string, number>();
-  const footnotes = new Map<string, string>();
-  for (const line of lines) {
-    const definition = line.match(/^\[\^([^\]]+)\]:\s*(.*)$/);
-    if (definition) footnotes.set(definition[1]!, definition[2]!);
-  }
-  let index = 0;
-  let paragraphNo = 0;
-  let listNo = 0;
-  let tableNo = 0;
-  const add = (block: RenderBlock) => blocks.push(block);
-
-  while (index < lines.length) {
-    const line = lines[index]!;
-    if (!line.trim() || /^\[\^[^\]]+\]:/.test(line)) {
-      index += 1;
+  const idByToken = new WeakMap<object, string>();
+  const blockStarts: Array<{
+    index: number;
+    id: string;
+    kind: BlockKind;
+    end: number;
+  }> = [];
+  const codeByToken = new Map<object, CodeBlock>();
+  const diagramByToken = new Map<object, string>();
+  const counts = new Map<string, number>();
+  const nextId = (prefix: string): string => {
+    const count = (counts.get(prefix) ?? 0) + 1;
+    counts.set(prefix, count);
+    return `${prefix}-${count}`;
+  };
+  const starts = new Set([
+    "heading_open",
+    "paragraph_open",
+    "blockquote_open",
+    "bullet_list_open",
+    "ordered_list_open",
+    "table_open",
+    "html_block",
+    "fence",
+    "footnote_block_open",
+  ]);
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]!;
+    if (
+      !starts.has(token.type) ||
+      (token.type !== "fence" && token.level !== 0)
+    )
       continue;
+    const prefix =
+      token.type === "heading_open"
+        ? "heading"
+        : token.type === "paragraph_open"
+          ? "paragraph"
+          : token.type === "fence"
+            ? "code"
+            : token.type === "html_block"
+              ? "html"
+              : token.type === "footnote_block_open"
+                ? "footnotes"
+                : token.type.replace("_open", "");
+    const id = nextId(prefix);
+    idByToken.set(token, id);
+    let end = i;
+    if (token.nesting === 1) {
+      let depth = 0;
+      for (let j = i; j < tokens.length; j += 1) {
+        depth += tokens[j]!.nesting;
+        if (j > i && depth === 0) {
+          end = j;
+          break;
+        }
+      }
     }
-    const fence = line.match(/^ {0,3}(`{3,}|~{3,})\s*([^\s]*)?.*$/);
-    if (fence) {
-      const marker = fence[1]!;
-      const body: string[] = [];
-      index += 1;
-      while (
-        index < lines.length &&
-        !new RegExp(`^ {0,3}${marker[0]}{${marker.length},}\\s*$`).test(
-          lines[index]!,
-        )
-      )
-        body.push(lines[index++]!);
-      if (index < lines.length) index += 1;
-      const id = `code-${codeBlocks.length + 1}`;
-      const language = normalizeLanguage(fence[2] ?? "");
+    let kind: BlockKind =
+      token.type === "heading_open"
+        ? "heading"
+        : token.type === "fence"
+          ? "code"
+          : token.type === "table_open"
+            ? "table"
+            : token.type === "blockquote_open"
+              ? "quote"
+              : token.type.includes("list")
+                ? "list"
+                : "paragraph";
+    let text =
+      token.type === "fence"
+        ? token.content.endsWith("\n")
+          ? token.content.slice(0, -1)
+          : token.content
+        : tokenText(tokens, i, end);
+    if (
+      token.type === "paragraph_open" &&
+      /^\uE000MDVR_MATH_\d+\uE001$/.test(tokens[i + 1]?.content ?? "")
+    ) {
+      kind = "math";
+      text =
+        prepared.parts[Number(tokens[i + 1]!.content.match(/\d+/)![0])]!.source;
+    }
+    if (token.type === "heading_open") {
+      const raw = tokenText(tokens, i, end);
+      const headingId = slugifyHeading(raw, usedSlugs);
+      token.attrSet("id", headingId);
+      const heading: Heading = {
+        id: headingId,
+        level: Number(token.tag.slice(1)),
+
+        text: plainText(raw),
+        blockId: id,
+      };
+      (token as any).__mdvrHeading = heading;
+    }
+    if (token.type === "fence") {
+      const rawLanguage = (token.info ?? "").trim().split(/\s+/, 1)[0] ?? "";
+      const language = normalizeLanguage(rawLanguage);
+      const highlighted = Boolean(
+        language && hljs.getLanguage(language === "html" ? "xml" : language),
+      );
       const code: CodeBlock = {
         blockId: id,
         language,
-        source: body.join("\n"),
-        highlighted: false,
+        source: text,
+        highlighted,
       };
-      codeBlocks.push(code);
-      if ((fence[2] ?? "").toLowerCase() === "mermaid") {
-        const result = renderMermaid(code.source, {
-          ...DEFAULT_RENDER_BUDGET,
-          ...options.budget,
-        });
-        if (result.status === "error")
-          errors.push({
-            kind: "mermaid",
-            message: result.message!,
-            blockId: id,
-          });
-        add({
-          id,
-          kind: "diagram",
-          text: code.source,
-          html: blockShell(
-            "div",
-            id,
-            `<pre class="mermaid-source"><code>${escapeHtml(code.source)}</code></pre>${result.html}`,
-          ),
-          code,
-        });
-      } else {
-        add({
-          id,
-          kind: "code",
-          text: code.source,
-          html: blockShell(
-            "pre",
-            id,
-            `<code data-language="${escapeAttribute(language ?? "")}" data-highlighted="false">${escapeHtml(code.source)}</code>`,
-          ),
-          code,
-        });
+      codeByToken.set(token, code);
+      if (rawLanguage.toLowerCase() === "mermaid") {
+        kind = "diagram";
+        diagramByToken.set(token, id);
       }
-      continue;
+      text = code.source;
     }
-    const heading = line.match(/^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
-    if (heading) {
-      const id = `heading-${headings.length + 1}`;
-      const rendered = renderInline(heading[2]!, options, errors, id);
-      const headingId = slugifyHeading(plainText(heading[2]!), usedSlugs);
-      const item = {
-        id: headingId,
-        level: heading[1]!.length,
-        text: plainText(heading[2]!),
-        blockId: id,
-      };
-      headings.push(item);
-      resources.push(...rendered.resources);
-      add({
-        id,
-        kind: "heading",
-        text: item.text,
-        html: `<h${item.level} id="${escapeAttribute(item.id)}" data-block-id="${id}" data-searchable>${rendered.html}</h${item.level}>`,
-      });
-      index += 1;
-      continue;
-    }
-    if (
-      index + 1 < lines.length &&
-      line.includes("|") &&
-      isTableDivider(lines[index + 1]!)
-    ) {
-      const tableLines = [line, lines[index + 1]!];
-      index += 2;
-      while (
-        index < lines.length &&
-        lines[index]!.includes("|") &&
-        lines[index]!.trim()
-      )
-        tableLines.push(lines[index++]!);
-      const id = `table-${++tableNo}`;
-      const table = renderTable(tableLines, id, options);
-      resources.push(...table.resources);
-      add({ id, kind: "table", text: table.text, html: table.html });
-      continue;
-    }
-    const listStart = line.match(/^\s*(?:[-+*]|\d+[.)])\s+(.*)$/);
-    if (listStart) {
-      const items: string[] = [];
-      const ordered = /^\s*\d+[.)]/.test(line);
-      while (index < lines.length) {
-        const item = lines[index]!.match(/^\s*(?:[-+*]|\d+[.)])\s+(.*)$/);
-        if (!item) break;
-        items.push(item[1]!);
-        index += 1;
-      }
-      const id = `list-${++listNo}`;
-      const itemHtml = items
-        .map((item) => {
-          const task = item.match(/^\[([ xX])\]\s+(.*)$/);
-          const value = task
-            ? `<input type="checkbox" disabled${task[1]!.toLowerCase() === "x" ? " checked" : ""}> ${task[2]}`
-            : item;
-          const rendered = renderInline(value, options, errors, id);
-          resources.push(...rendered.resources);
-          return `<li>${task ? value.replace(task[2]!, rendered.html) : rendered.html}</li>`;
-        })
-        .join("");
-      add({
-        id,
-        kind: "list",
-        text: items.map(plainText).join("\n"),
-        html: blockShell(ordered ? "ol" : "ul", id, itemHtml),
-      });
-      continue;
-    }
-    if (/^\s*>/.test(line)) {
-      const quoteLines: string[] = [];
-      while (index < lines.length && /^\s*>/.test(lines[index]!))
-        quoteLines.push(lines[index++]!.replace(/^\s*>\s?/, ""));
-      const id = `quote-${blocks.length + 1}`;
-      const rendered = renderInline(quoteLines.join(" "), options, errors, id);
-      resources.push(...rendered.resources);
-      add({
-        id,
-        kind: "quote",
-        text: rendered.text,
-        html: blockShell("blockquote", id, rendered.html),
-      });
-      continue;
-    }
-    if (/^\s*\$\$\s*$/.test(line)) {
-      const body: string[] = [];
-      index += 1;
-      while (index < lines.length && !/^\s*\$\$\s*$/.test(lines[index]!))
-        body.push(lines[index++]!);
-      const closed = index < lines.length;
-      if (closed) index += 1;
-      const id = `math-${blocks.length + 1}`;
-      const sourceText = body.join("\n");
-      const result = closed
-        ? renderMath(
-            sourceText,
-            true,
-            options.budget?.maxMathBytes ?? DEFAULT_RENDER_BUDGET.maxMathBytes,
-          )
-        : {
-            status: "error" as const,
-            html: `<div class="render-error">Math input is incomplete.</div>`,
-            message: "Math input is incomplete.",
-          };
-      if (result.status === "error")
-        errors.push({ kind: "math", message: result.message!, blockId: id });
-      add({
-        id,
-        kind: "math",
-        text: sourceText,
-        html: blockShell(
-          "div",
-          id,
-          `<pre class="math-source"><code>${escapeHtml(sourceText)}</code></pre>${result.html}`,
-        ),
-      });
-      continue;
-    }
-    const paragraph: string[] = [line];
-    index += 1;
-    while (
-      index < lines.length &&
-      lines[index]!.trim() &&
-      !/^ {0,3}(?:#{1,6}\s|```|~~~|>|[-+*]\s+|\d+[.)]\s+)/.test(lines[index]!)
-    )
-      paragraph.push(lines[index++]!);
-    const id = `paragraph-${++paragraphNo}`;
-    const rendered = renderInline(paragraph.join(" "), options, errors, id);
-    resources.push(...rendered.resources);
-    let text = rendered.text;
-    text = text.replace(
-      /\[\^([^\]]+)\]/g,
-      (_whole, name) => footnotes.get(name) ?? name,
-    );
-    add({
-      id,
-      kind: "paragraph",
-      text,
-      html: blockShell("p", id, rendered.html),
-    });
+    blockStarts.push({ index: i, id, kind, end });
   }
+  const productionMd = makeMarkdown(
+    options,
+    idByToken,
+    prepared.parts,
+    codeByToken,
+    diagramByToken,
+  );
+  // Use same parser instance configuration, but token metadata is shared by object identity only within this render.
+  const rendered = productionMd.renderer.render(
+    tokens,
+    productionMd.options,
+    env,
+  );
+  const blocks: RenderBlock[] = [];
+  const rawParts = rendered.split(/(<!--mdvr:[^>]+-->|<!--\/mdvr-->)/g);
+  let active: { id: string; html: string } | null = null;
+  for (const part of rawParts) {
+    const open = part.match(/^<!--mdvr:([^>]+)-->$/);
+    if (open) {
+      active = { id: open[1]!, html: "" };
+      continue;
+    }
+    if (part === "<!--/mdvr-->") {
+      if (active) {
+        const info = blockStarts.find((item) => item.id === active!.id)!;
+        const code = info
+          ? [...codeByToken.values()].find((item) => item.blockId === info.id)
+          : undefined;
+        blocks.push({
+          id: active.id,
+          kind: info?.kind ?? "paragraph",
+          text:
+            info?.index === undefined
+              ? ""
+              : blockStarts.find((item) => item.id === active!.id)
+                ? info.kind === "code" || info.kind === "diagram"
+                  ? (code?.source ?? "")
+                  : tokenText(tokens, info.index, info.end)
+                : "",
+          html: sanitizeHtml(active.html, {
+            ...options,
+            approvedUrls: env.approvedUrls,
+          }),
+          code,
+        });
+      }
+      active = null;
+      continue;
+    }
+    if (active) active.html += part;
+  }
+  const errors: RenderError[] = [];
+  if (prepared.malformed)
+    errors.push({ kind: "math", message: "Math input is incomplete." });
+  for (const token of tokens)
+    if (token.type === "fence" && diagramByToken.has(token)) {
+      const result = renderMermaid(token.content.replace(/\n$/, ""), {
+        ...DEFAULT_RENDER_BUDGET,
+        ...options.budget,
+      });
+      if (result.status === "error")
+        errors.push({
+          kind: "mermaid",
+          message: result.message!,
+          blockId: diagramByToken.get(token),
+        });
+    }
+  for (const block of blocks)
+    if (block.kind === "math") {
+      const result = renderMath(
+        block.text,
+        true,
+        options.budget?.maxMathBytes ?? DEFAULT_RENDER_BUDGET.maxMathBytes,
+      );
+      if (result.status === "error")
+        errors.push({
+          kind: "math",
+          message: result.message!,
+          blockId: block.id,
+        });
+    }
+  for (const headingToken of tokens.filter(
+    (token) => token.type === "heading_open" && (token as any).__mdvrHeading,
+  )) {
+    const heading = (headingToken as any).__mdvrHeading as Heading;
+    const block = blocks.find((item) => item.id === heading.blockId);
+    if (block) {
+      block.kind = "heading";
+      block.text = heading.text;
+    }
+  }
+  const headings: Heading[] = tokens
+    .filter(
+      (token) => token.type === "heading_open" && (token as any).__mdvrHeading,
+    )
+    .map((token) => (token as any).__mdvrHeading as Heading);
+  let html = sanitizeHtml(
+    rendered
+      .replace(/<!--mdvr:[^>]+-->|<!--\/mdvr-->/g, "")
+      .replace(/\b(?:javascript|vbscript|data|file|gopher):/gi, ""),
+    { ...options, approvedUrls: env.approvedUrls },
+  );
+  html = html.replace(
+    /<h([1-6])\b([^>]*)>([\s\S]*?)<\/h\1>/gi,
+    (whole, level: string, attrs: string, body: string) => {
+      if (/\bid\s*=\s*["']/i.test(attrs)) return whole;
+      const text = plainText(body);
+      const id = slugifyHeading(text, usedSlugs);
+      const blockId =
+        blocks.find((block) => block.text.includes(text))?.id ?? "html";
+      headings.push({ id, level: Number(level), text, blockId });
+      return `<h${level} id="${escapeAttribute(id)}"${attrs}>${body}</h${level}>`;
+    },
+  );
   return {
     source,
     generation: options.generation,
-    html: blocks.map((block) => block.html).join("\n"),
+    html,
     blocks,
     headings,
-    codeBlocks,
-    resources,
+    codeBlocks: [...codeByToken.values()],
+    resources: env.resources,
     errors,
   };
 }
@@ -892,14 +1058,13 @@ export function searchRendered(
   caseSensitive = false,
 ): SearchMatch[] {
   if (!query) return [];
+  const needle = caseSensitive ? query : query.toLocaleLowerCase();
   const matches: SearchMatch[] = [];
   for (const block of model.blocks) {
     const haystack = caseSensitive
       ? block.text
       : block.text.toLocaleLowerCase();
-    const needle = caseSensitive ? query : query.toLocaleLowerCase();
-    let from = 0;
-    while (from <= haystack.length - needle.length) {
+    for (let from = 0; from <= haystack.length - needle.length; ) {
       const index = haystack.indexOf(needle, from);
       if (index < 0) break;
       matches.push({
@@ -928,13 +1093,12 @@ export function preserveSelection(
       previous.startOffset,
       previous.startOffset + previous.text.length,
     ) === previous.text
-  ) {
+  )
     return {
       ...previous,
       endBlockId: previous.startBlockId,
       endOffset: previous.startOffset + previous.text.length,
     };
-  }
   for (const block of next.blocks) {
     const index = block.text.indexOf(previous.text);
     if (index >= 0)
@@ -961,18 +1125,15 @@ export class GenerationGate {
     return this.isCurrent(generation) ? { generation, value } : null;
   }
 }
-
 export async function rejectStale<T>(
   gate: GenerationGate,
   generation: number,
   work: () => T | Promise<T>,
 ): Promise<RenderedAsync<T> | null> {
-  const value = await work();
-  return gate.accept(generation, value);
+  return gate.accept(generation, await work());
 }
 
 export function mountDocument(root: HTMLElement, model: RenderModel): void {
-  // One content root keeps browser selection and focus outside renderer-owned DOM.
   root.dataset.generation =
     model.generation === undefined ? "" : String(model.generation);
   const parsed = new DOMParser().parseFromString(model.html, "text/html");

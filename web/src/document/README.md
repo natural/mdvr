@@ -1,10 +1,15 @@
-# Document renderer lane C
+# Document renderer
 
-`renderer.ts` is dependency-neutral core/scaffold for revision-1 `document.load` data. It preserves source/code text separately, emits explicit resource requests, sanitizes document HTML by allowlist, tracks heading/block locators, searches rendered and code text literally, preserves selection when selected text survives, and rejects stale generations.
+Production renderer for revision-1 `document.load` data.
 
-## Deliberate gaps and dependency requests
+- `markdown-it` + footnote/task-list plugins provide CommonMark/GFM features.
+- DOMPurify sanitizes browser output; pure Bun tests use bounded fallback sanitizer.
+- `highlight.js` uses bundled common grammars and preserves original code in `CodeBlock.source`.
+- KaTeX renders bounded inline/display math. Mermaid is bundled and completed lazily through `renderMermaidAsync`.
+- `resolveResource` remains only image/SVG resource URL authority; denied resources stay placeholders.
+- Heading IDs, block locators, literal search, selection preservation, and generation rejection remain renderer-owned APIs.
+- `main.ts` mounts production output, exposes `mdvrLoadDocument`/`mdvrSearchDocument`, and rejects stale Mermaid completion.
 
-- No CommonMark parser, syntax highlighter, Mermaid engine, or TeX engine is bundled here. Current parser is bounded fixture coverage; code remains escaped/plain; Mermaid and TeX expose finite pending/error states.
-- Request approval for pinned, offline-compatible parser/sanitizer/highlighter/Mermaid/TeX assets before replacing hooks. Record versions, licenses, bundle sizes, and macOS/WebKit behavior in M0 evidence.
-- `resolveResource` is the only path from document references to URLs. Native broker must supply it; absent approval produces image placeholders and no direct resource URL.
-- `mountDocument` uses `DOMParser` plus `replaceChildren`; native/WebKit tests still must prove copy, focus, selection, reload, CSP, and policy behavior.
+`mountDocument` uses `DOMParser` and `replaceChildren`; embedded WebKit copy,
+focus, reload, selection, and native resource-policy evidence remain host-level
+verification gaps, not Bun DOM-test claims.

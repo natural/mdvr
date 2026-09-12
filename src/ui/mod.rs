@@ -515,6 +515,51 @@ impl ShellView {
 }
 
 #[cfg(target_os = "macos")]
+fn shell_summary(state: &ShellState) -> String {
+    let document = state
+        .current_document
+        .as_ref()
+        .map_or_else(|| "(none)".to_owned(), |path| path.display().to_string());
+    let entries = state
+        .picker
+        .visible()
+        .into_iter()
+        .map(|entry| {
+            let marker = if state.picker.selected() == Some(entry.relative_path.as_str()) {
+                ">"
+            } else {
+                " "
+            };
+            format!("{marker} {}", entry.relative_path)
+        })
+        .collect::<Vec<_>>();
+    let status = state
+        .picker
+        .status()
+        .map_or_else(|| "idle".to_owned(), |status| format!("{status:?}"));
+    let startup = state.startup_error.as_ref().map_or_else(
+        || "none".to_owned(),
+        |error| {
+            format!(
+                "{}: {}\nRecovery: Retry | Choose file | Browse folder",
+                error.failed_path.display(),
+                error.message
+            )
+        },
+    );
+
+    format!(
+        "mdvr shell\nDocument: {document}\nPicker query: {:?}\nPicker status: {status}\nPicker entries:\n{}\nStartup error: {startup}",
+        state.picker.query(),
+        if entries.is_empty() {
+            "(none)".to_owned()
+        } else {
+            entries.join("\n")
+        }
+    )
+}
+
+#[cfg(target_os = "macos")]
 impl gpui::Render for ShellView {
     fn render(
         &mut self,
@@ -522,7 +567,7 @@ impl gpui::Render for ShellView {
         _cx: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
         use gpui::{div, prelude::*};
-        div().size_full().child("mdvr shell")
+        div().size_full().child(shell_summary(&self.state))
     }
 }
 

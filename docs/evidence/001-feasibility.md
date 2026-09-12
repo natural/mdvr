@@ -13,8 +13,9 @@ claim production rendering.
 - `src/app.rs` opens one GPUI window and owns one embedded view.
 - `src/platform/mod.rs` obtains GPUI's AppKit `NSView`, creates `WKWebView`
   through the Objective-C runtime, uses `WKWebsiteDataStore`'s
-  `nonPersistentDataStore`, loads bundled `web/index.html`, and sets
-  width/height autoresizing.
+  `nonPersistentDataStore`, loads production `web/dist` assets from the
+  packaged `Contents/Resources/web` directory or dev-checkout fallback, and
+  sets width/height autoresizing.
 - Native delegate class conforms to `WKNavigationDelegate` and implements the
   SDK-documented `webView:decidePolicyForNavigationAction:decisionHandler:`
   selector. It cancels every navigation action. No unsupported selector is
@@ -94,7 +95,7 @@ and linkage. It does not prove delegate callback execution.
 
 | Check | Current evidence | Status |
 | --- | --- | --- |
-| Offline fixture is bundled | `include_str!("../../web/index.html")`; `bun run build` passes | implemented |
+| Offline production bundle is loaded | `loadFileURL:allowingReadAccessToURL:` selects packaged `Contents/Resources/web` or dev `web/dist`; `bun run build` passes | source/build verified |
 | HTML/code/Mermaid/TeX placeholders | Static sections and source text in `web/index.html` | implemented as placeholders only |
 | Search/selection/copy hooks | Fixture JS handlers and visible status messages | implemented in fixture; WebKit interaction unverified |
 | Restrictive CSP | Static nonce CSP in fixture; build passes | source/build verified; runtime enforcement unverified |
