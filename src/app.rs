@@ -31,9 +31,9 @@ use crate::{
     platform::{
         EmbeddedWebView,
         bridge::{BridgeContext, BridgeMessage},
-        choose_directory, choose_json_file, choose_markdown_file, confirm_outside_resource,
-        confirm_remote_images, drain_bridge_messages, file_url_path, open_external_url,
-        open_local_file,
+        choose_directory, choose_json_file, choose_markdown_file, confirm_large_document,
+        confirm_outside_resource, confirm_remote_images, drain_bridge_messages, file_url_path,
+        open_external_url, open_local_file,
         remote_fetch::fetch_image,
         remote_policy::{RemoteLimits, RemotePolicy},
         resource_policy::{ResourceAuthorization, ResourceDenied, ResourcePolicy},
@@ -1156,26 +1156,17 @@ impl MdvrView {
 
     fn load_navigation(&mut self, request: LoadRequest, cx: &mut Context<Self>) {
         let path = request.path.clone();
-        match load_source(&path, false) {
-            Ok(source) => {
-                let watched_source = source.clone();
-                let accepted = self.web_view.as_mut().map_or(Ok(true), |web_view| {
-                    web_view.load_document_source(&source.source, request.generation)
-                });
-                match accepted {
-                    Ok(true) => match self.navigation.commit_load(request, source) {
-                        Ok(document) => {
-                            self.commit_document(document);
-                            self.watch_document(path, Some(watched_source), cx);
-                        }
-                        Err(error) => eprintln!("mdvr: stale navigation completion: {error}"),
-                    },
-                    Ok(false) => {
-                        let _ = self.navigation.fail_load(&request);
-                    }
+        let source = match load_source(&path, false) {
+            Ok(source) => source,
+            Err(LoadError::NeedsConfirmation { path, bytes })
+                if confirm_large_document(&path, bytes) =>
+            {
+                match load_source(&path, true) {
+                    Ok(source) => source,
                     Err(error) => {
                         let _ = self.navigation.fail_load(&request);
-                        eprintln!("mdvr: cannot prepare navigation: {error}");
+                        self.report_error(format!("Cannot open {}: {error}", path.display()));
+                        return;
                     }
                 }
             }
@@ -1183,6 +1174,27 @@ impl MdvrView {
                 self.failed_path = Some(path.clone());
                 let _ = self.navigation.fail_load(&request);
                 self.report_error(format!("Cannot open {}: {error}", path.display()));
+                return;
+            }
+        };
+        let watched_source = source.clone();
+        let accepted = self.web_view.as_mut().map_or(Ok(true), |web_view| {
+            web_view.load_document_source(&source.source, request.generation)
+        });
+        match accepted {
+            Ok(true) => match self.navigation.commit_load(request, source) {
+                Ok(document) => {
+                    self.commit_document(document);
+                    self.watch_document(path, Some(watched_source), cx);
+                }
+                Err(error) => eprintln!("mdvr: stale navigation completion: {error}"),
+            },
+            Ok(false) => {
+                let _ = self.navigation.fail_load(&request);
+            }
+            Err(error) => {
+                let _ = self.navigation.fail_load(&request);
+                eprintln!("mdvr: cannot prepare navigation: {error}");
             }
         }
     }

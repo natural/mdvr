@@ -208,6 +208,15 @@ fn confirm(title: &str, detail: &str, allow: &str, cancel: &str) -> bool {
     }
 }
 
+pub(crate) fn confirm_large_document(path: &Path, bytes: usize) -> bool {
+    confirm(
+        "Open this large Markdown file?",
+        &format!("{} ({:.1} MiB)", path.display(), bytes as f64 / 1_048_576.0),
+        "Open Full File",
+        "Cancel",
+    )
+}
+
 pub(crate) fn confirm_remote_images(url: &str) -> bool {
     confirm(
         "Load remote images for this document?",

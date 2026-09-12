@@ -155,7 +155,8 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   creation, removing scripts, handlers and every href/xlink external reference.
   Live WKWebView showed only safe text/image output. Evidence:
   [hostile content](screenshots/hostile-content.png).
-- Files above 10 MiB now stop on visible full-load confirmation; confirmed files
+- Files above 10 MiB now stop on visible full-load confirmation, including
+  navigation/Finder/CLI replacement of an existing document; confirmed files
   retain permission across reload while all source paths enforce a 20 MiB hard
   ceiling. Live 10,485,765-byte code-heavy fixture prompted, then rendered full
   heading/code content without truncation. Evidence:
