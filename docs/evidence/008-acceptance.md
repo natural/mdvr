@@ -257,8 +257,14 @@ Required 2020 M1 MacBook Air 8 GB baseline remains unavailable. Provisional
 release measurement on MacBook Pro Mac14,10, M2 Pro, 16 GB used a 1,048,576-byte
 single-code-block fixture across five cold process launches: 411.2, 426.2, 435.1,
 482.4, and 505.6 ms from native document commit to validated `render.ready`
-(median 435.1 ms; one run exceeded 500 ms). Lazy completion excluded. Intel/x86_64
-and universal builds are blocked by available arm64-only target/toolchain. Unsigned arm64 app and compressed DMG were built;
+(median 435.1 ms; one run exceeded 500 ms). Lazy completion excluded. Measured
+renderer cleanup removed per-block duplicate sanitization and linear scans while
+retaining one full-document sanitization. The checked `scripts/verify/measure-reload.py` harness generated a 1,048,595-byte
+prose fixture with 2,198 blocks and measured warm reload commit-to-ready times of
+188.8, 179.6, 183.8, 179.8, and 181.0 ms (median 181.0 ms); observed save-to-ready
+totals including poll/debounce were 331.9, 327.8, 318.0, 312.9, and 321.7 ms
+(median 321.7 ms). This meets the <200 ms post-debounce target by median on the provisional M2 Pro,
+not the unavailable M1 baseline. Intel/x86_64 and universal builds are blocked by available arm64-only target/toolchain. Unsigned arm64 app and compressed DMG were built;
 read-only DMG mount passed full bundle/Mach-O/framework/icon inspection. Original
 project icon is generated into ICNS. Bundle minimum macOS 11.0 matches release
 Mach-O `LC_BUILD_VERSION` and is enforced by inspection. Deterministic notices

@@ -49,7 +49,6 @@ export interface RenderBlock {
   id: string;
   kind: BlockKind;
   text: string;
-  html: string;
   code?: CodeBlock;
 }
 export interface RenderModel {
@@ -934,42 +933,37 @@ export function renderDocument(
     env,
   );
   const blocks: RenderBlock[] = [];
+  const blockById = new Map(blockStarts.map((block) => [block.id, block]));
+  const codeById = new Map(
+    [...codeByToken.values()].map((code) => [code.blockId, code]),
+  );
   const rawParts = rendered.split(/(<!--mdvr:[^>]+-->|<!--\/mdvr-->)/g);
-  let active: { id: string; html: string } | null = null;
+  let active: { id: string } | null = null;
   for (const part of rawParts) {
     const open = part.match(/^<!--mdvr:([^>]+)-->$/);
     if (open) {
-      active = { id: open[1]!, html: "" };
+      active = { id: open[1]! };
       continue;
     }
     if (part === "<!--/mdvr-->") {
       if (active) {
-        const info = blockStarts.find((item) => item.id === active!.id)!;
-        const code = info
-          ? [...codeByToken.values()].find((item) => item.blockId === info.id)
-          : undefined;
+        const info = blockById.get(active.id);
+        const code = info ? codeById.get(info.id) : undefined;
         blocks.push({
           id: active.id,
           kind: info?.kind ?? "paragraph",
           text:
             info?.index === undefined
               ? ""
-              : blockStarts.find((item) => item.id === active!.id)
-                ? info.kind === "code" || info.kind === "diagram"
-                  ? (code?.source ?? "")
-                  : tokenText(tokens, info.index, info.end)
-                : "",
-          html: sanitizeHtml(active.html, {
-            ...options,
-            approvedUrls: env.approvedUrls,
-          }),
+              : info.kind === "code" || info.kind === "diagram"
+                ? (code?.source ?? "")
+                : tokenText(tokens, info.index, info.end),
           code,
         });
       }
       active = null;
       continue;
     }
-    if (active) active.html += part;
   }
   const errors: RenderError[] = [];
   if (prepared.malformed)
