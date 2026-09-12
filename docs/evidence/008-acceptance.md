@@ -224,7 +224,9 @@ static-image MIME types. Automated policy/fetch tests pass; integrated fetched-i
 rendering remains without live evidence. Local non-Markdown routing canonicalizes
 before dispatch: images open through `NSWorkspace`, other regular files require
 exact-path native confirmation, and executable-mode files/directories are denied.
-Automated executable-policy coverage passes; live external-app dispatch remains open.
+Automated executable-policy coverage passes. Live text-file link showed canonical
+exact path in native confirmation before dispatch; external-app completion remains
+open. Evidence: [local file consent](screenshots/local-file-consent.png).
 
 ## Performance and distribution
 
