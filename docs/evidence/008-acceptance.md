@@ -284,9 +284,11 @@ not the unavailable M1 baseline. Rustup 1.29.1 supplied pinned Rust 1.98.1 arm64
 and x86_64 targets; both release slices compiled and `lipo` produced verified
 `x86_64 arm64` app and compressed DMG. Native arm64 launch passes; forcing x86_64
 through Rosetta launched the full GPUI/WKWebView app, rendered `readme.md`, and emitted
-`rendered generation 1 in 469.0 ms`. Physical Intel runtime remains unverified without
-Intel hardware. Read-only DMG
-mount passed full bundle/Mach-O/framework/icon inspection. Pinned
+`rendered generation 1 in 469.0 ms`. A read-only mounted DMG then launched with fresh
+isolated homes and rendered `readme.md` through arm64 (387.9 ms) and forced x86_64
+Rosetta (347.0 ms) slices, proving bundled offline assets independent of development
+paths/profile state. Physical Intel and separate clean-machine runtime remain unverified.
+Read-only DMG mount passed full bundle/Mach-O/framework/icon inspection. Pinned
 macOS CI now rebuilds release binary, app, and DMG and reruns mounted-image inspection
 on every push/PR. Original
 project icon is generated into ICNS. Universal build pins
