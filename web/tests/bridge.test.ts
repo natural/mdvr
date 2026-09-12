@@ -46,6 +46,12 @@ test("local images use context-bound native resource requests", () => {
   expect(html).toContain("URL.revokeObjectURL(url)");
 });
 
+test("text scale shortcuts stay native-owned", () => {
+  expect(html).toContain("kind: 'text_scale'");
+  expect(html).toContain("['+', '=', '-', '0'].includes(event.key)");
+  expect(html).not.toContain("localStorage");
+});
+
 test("document search is keyboard accessible and wraps", () => {
   expect(html).toContain('role="search"');
   expect(html).toContain("event.metaKey && event.key.toLowerCase() === 'f'");

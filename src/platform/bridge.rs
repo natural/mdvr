@@ -138,6 +138,7 @@ fn is_supported(action: &ActionMessage) -> bool {
             | ActionMessage::SelectAll
             | ActionMessage::Outline(_)
             | ActionMessage::Focus(_)
+            | ActionMessage::TextScale(_)
     )
 }
 

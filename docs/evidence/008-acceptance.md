@@ -98,7 +98,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   launch accepted ⌘F without a prerequisite document click. HTTP(S) targets now
   pass bounded credential/private-address policy before native `NSWorkspace`
   dispatch; bounded control-free mailto targets use same shell-free dispatch.
-- Latest checkpoint verified debug build, 76 Rust tests/clippy and 20 web tests/build.
+- ⌘+/⌘-/⌘0 now send context-bound text-scale actions to native state; native
+  bounds 50–300%, reapplies validated appearance tokens, and atomically persists
+  scale. Isolated runtime ⌘= changed visible scale and saved 110%. Evidence:
+  [text scale](screenshots/text-scale.png).
+- Latest checkpoint verified debug build, 77 Rust tests/clippy and 21 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 

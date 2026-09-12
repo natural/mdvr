@@ -148,6 +148,11 @@ fn dispatch_bridge_action(
         ActionMessage::Outline(action) => {
             shell.outline_visible = matches!(action, crate::contracts::OutlineAction::Open);
         }
+        ActionMessage::TextScale(action) => shell.dispatch(match action {
+            crate::contracts::TextScaleAction::Increase => ShellCommand::IncreaseTextSize,
+            crate::contracts::TextScaleAction::Decrease => ShellCommand::DecreaseTextSize,
+            crate::contracts::TextScaleAction::Reset => ShellCommand::ResetTextSize,
+        }),
         ActionMessage::CapturePosition(_) | ActionMessage::RestorePosition(_) => {
             unreachable!("router filters bridge actions")
         }
@@ -213,6 +218,7 @@ impl MdvrView {
         self.preferences = conventional_path()
             .map(|path| load_or_default(&path).preferences)
             .unwrap_or_default();
+        self.shell.text_scale_percent = self.preferences.text_scale_percent;
         if launch.state.document.is_none() {
             self.start_discovery(cx);
             window.focus(&self.picker_focus);
@@ -468,10 +474,16 @@ impl MdvrView {
                         ActionMessage::Focus(crate::contracts::FocusOwner::Renderer)
                     );
                     if dispatch_bridge_action(&mut self.shell, self.bridge_context, &action).is_ok()
-                        && focus_renderer
-                        && let Some(web_view) = self.web_view.as_ref()
                     {
-                        let _ = web_view.focus();
+                        if matches!(action.action, ActionMessage::TextScale(_)) {
+                            self.preferences.text_scale_percent = self.shell.text_scale_percent;
+                            self.appearance_mode = None;
+                            self.save_preferences();
+                            cx.notify();
+                        }
+                        if focus_renderer && let Some(web_view) = self.web_view.as_ref() {
+                            let _ = web_view.focus();
+                        }
                     }
                 }
                 BridgeMessage::Navigation(request) => self.dispatch_navigation(request, cx),
@@ -820,6 +832,22 @@ mod tests {
         assert_eq!(resource_mime("photo.jpeg").as_deref(), Some("image/jpeg"));
         assert_eq!(resource_mime("animated.gif"), None);
         assert_eq!(resource_mime("payload.html"), None);
+    }
+
+    #[test]
+    fn dispatches_text_scale_into_native_state() {
+        let mut shell = ShellState::new();
+        dispatch_bridge_action(
+            &mut shell,
+            BridgeContext::default(),
+            &action(
+                None,
+                None,
+                ActionMessage::TextScale(crate::contracts::TextScaleAction::Increase),
+            ),
+        )
+        .unwrap();
+        assert_eq!(shell.text_scale_percent, 110);
     }
 
     #[test]

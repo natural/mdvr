@@ -483,6 +483,8 @@ pub enum ActionMessage {
     RestorePosition(RestorePosition),
     #[serde(rename = "focus")]
     Focus(FocusOwner),
+    #[serde(rename = "text_scale")]
+    TextScale(TextScaleAction),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -492,6 +494,14 @@ pub enum SearchAction {
     Next,
     Previous,
     Close,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextScaleAction {
+    Increase,
+    Decrease,
+    Reset,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
