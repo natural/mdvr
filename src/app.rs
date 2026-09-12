@@ -133,9 +133,12 @@ fn dispatch_bridge_action(
             };
             shell.focus.open(owner);
         }
-        ActionMessage::Outline(_)
-        | ActionMessage::CapturePosition(_)
-        | ActionMessage::RestorePosition(_) => unreachable!("router filters bridge actions"),
+        ActionMessage::Outline(action) => {
+            shell.outline_visible = matches!(action, crate::contracts::OutlineAction::Open);
+        }
+        ActionMessage::CapturePosition(_) | ActionMessage::RestorePosition(_) => {
+            unreachable!("router filters bridge actions")
+        }
     }
     Ok(())
 }

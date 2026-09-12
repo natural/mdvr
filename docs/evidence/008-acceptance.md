@@ -78,7 +78,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   `xcodebuild -downloadComponent MetalToolchain` on pasteboard; fallback uses a
   temporary exact DOM range only after Clipboard API failure. Evidence:
   [code copy](screenshots/code-copy.png).
-- Latest checkpoint verified debug build, 75 Rust tests/clippy and 18 web tests/build.
+- Responsive Contents control builds links using safe text nodes from rendered
+  heading IDs. Live outline expanded with `mdvr` and `Development`; selecting
+  `Development` drove validated anchor navigation and changed scroll position.
+  Evidence: [outline](screenshots/outline.png).
+- Latest checkpoint verified debug build, 75 Rust tests/clippy and 19 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 

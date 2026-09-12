@@ -225,6 +225,22 @@ export function applyAppearance(value: unknown): boolean {
 const gate = new GenerationGate();
 let current: RenderModel | null = null;
 
+function installOutline(model: RenderModel) {
+    const outline = document.querySelector<HTMLElement>("#outline");
+    const toggle = document.querySelector<HTMLButtonElement>("#outline-toggle");
+    if (!outline || !toggle) return;
+    outline.replaceChildren();
+    for (const heading of model.headings) {
+        const link = document.createElement("a");
+        link.href = `#${heading.id}`;
+        link.textContent = heading.text;
+        link.style.marginLeft = `${Math.max(0, heading.level - 1)}rem`;
+        outline.append(link);
+    }
+    toggle.hidden = model.headings.length === 0;
+    if (toggle.hidden) outline.hidden = true;
+}
+
 function installCodeCopy(model: RenderModel) {
     root.querySelectorAll("pre > code").forEach((code, index) => {
         const source = model.codeBlocks[index]?.source;
@@ -284,6 +300,7 @@ export function loadDocument(source: string, generation = 1): RenderModel {
     const model = renderDocument(source, { generation });
     current = model;
     mountDocument(root, model);
+    installOutline(model);
     installCodeCopy(model);
     (
         window as Window & { mdvrRequestResources?: () => void }

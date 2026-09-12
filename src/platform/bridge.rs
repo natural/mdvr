@@ -136,6 +136,7 @@ fn is_supported(action: &ActionMessage) -> bool {
         ActionMessage::Search(_)
             | ActionMessage::Copy(_)
             | ActionMessage::SelectAll
+            | ActionMessage::Outline(_)
             | ActionMessage::Focus(_)
     )
 }
@@ -268,7 +269,11 @@ mod tests {
     #[test]
     fn rejects_unsupported_action() {
         let mut router = BridgeRouter::new(BridgeContext::default());
-        let unsupported = ActionMessage::Outline(crate::contracts::OutlineAction::Open);
+        let unsupported = ActionMessage::CapturePosition(crate::contracts::CapturePosition {
+            request: id(2),
+            document: DocumentId::new(1).unwrap(),
+            generation: Generation::new(1).unwrap(),
+        });
 
         assert_eq!(
             router.accept(&bytes(1, None, unsupported)),

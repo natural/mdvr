@@ -55,6 +55,13 @@ test("document search is keyboard accessible and wraps", () => {
   expect(html).toContain("event.key === 'Escape'");
 });
 
+test("outline is generated safely from rendered headings", () => {
+  expect(html).toContain('aria-label="Document outline"');
+  expect(main).toContain("for (const heading of model.headings)");
+  expect(main).toContain("link.textContent = heading.text");
+  expect(main).toContain("installOutline(model)");
+});
+
 test("code copy uses exact model source with clipboard fallback", () => {
   expect(main).toContain("model.codeBlocks[index]?.source");
   expect(main).toContain("navigator.clipboard.writeText(source)");

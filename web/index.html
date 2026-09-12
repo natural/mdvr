@@ -12,9 +12,15 @@
       #search[hidden] { display: none; }
       #search input { width: 16rem; font: inherit; }
       #search button { font: inherit; }
+      #outline-toggle { position: fixed; z-index: 2; left: .75rem; top: .75rem; font: inherit; }
+      #outline { position: fixed; z-index: 2; left: .75rem; top: 3.5rem; max-width: min(20rem, 45vw); max-height: calc(100vh - 4.25rem); overflow: auto; padding: .75rem; border-radius: .4rem; background: Canvas; box-shadow: 0 .2rem .8rem #0004; }
+      #outline[hidden], #outline-toggle[hidden] { display: none; }
+      #outline a { display: block; color: inherit; padding: .15rem 0; text-decoration: none; }
     </style>
   </head>
   <body>
+    <button id="outline-toggle" type="button" aria-expanded="false" hidden>Contents</button>
+    <nav id="outline" aria-label="Document outline" hidden></nav>
     <form id="search" role="search" hidden>
       <label><span class="visually-hidden">Find in document</span><input type="search" autocomplete="off" placeholder="Find in document"></label>
       <button type="button" data-step="-1" aria-label="Previous match">↑</button>
@@ -28,6 +34,7 @@
         const validBridgeAction = (action) => {
           if (!action || typeof action !== 'object' || typeof action.kind !== 'string') return false;
           if (action.kind === 'select_all') return Object.keys(action).length === 1;
+          if (action.kind === 'outline') return Object.keys(action).length === 2 && ['open', 'close'].includes(action.payload);
           if (action.kind === 'copy') return action.payload && Object.keys(action).length === 2 && action.payload.kind === 'code';
           if (action.kind !== 'search' || !action.payload || Object.keys(action).length !== 2) return false;
           const { kind, payload } = action.payload;
@@ -136,6 +143,13 @@
         window.mdvrMoveSearch = (step) => postNativeAction({ kind: 'search', payload: { kind: step < 0 ? 'previous' : 'next' } });
         window.mdvrCopyCode = () => postNativeAction({ kind: 'copy', payload: { kind: 'code' } });
         window.mdvrSelectAll = () => postNativeAction({ kind: 'select_all' });
+        const outline = document.querySelector('#outline');
+        const outlineToggle = document.querySelector('#outline-toggle');
+        outlineToggle.addEventListener('click', () => {
+          outline.hidden = !outline.hidden;
+          outlineToggle.setAttribute('aria-expanded', String(!outline.hidden));
+          postNativeAction({ kind: 'outline', payload: outline.hidden ? 'close' : 'open' });
+        });
         const search = document.querySelector('#search');
         const searchInput = search.querySelector('input');
         const moveSearch = (backwards = false) => {
