@@ -371,10 +371,9 @@ export function loadDocument(source: string, generation = 1): RenderModel {
     return model;
 }
 
-export async function copySource(): Promise<boolean> {
-    if (!current) return false;
+async function copyText(value: string): Promise<boolean> {
     try {
-        await navigator.clipboard.writeText(current.source);
+        await navigator.clipboard.writeText(value);
         return true;
     } catch {
         const active = document.activeElement as HTMLElement | null;
@@ -385,7 +384,7 @@ export async function copySource(): Promise<boolean> {
               )
             : [];
         const textarea = document.createElement("textarea");
-        textarea.value = current.source;
+        textarea.value = value;
         textarea.style.position = "fixed";
         textarea.style.opacity = "0";
         document.body.append(textarea);
@@ -397,6 +396,16 @@ export async function copySource(): Promise<boolean> {
         active?.focus();
         return copied;
     }
+}
+
+export function copySource(): Promise<boolean> {
+    return copyText(current?.source ?? "");
+}
+
+export function copyRendered(): Promise<boolean> {
+    return copyText(
+        current?.blocks.map((block) => block.text).join("\n\n") ?? "",
+    );
 }
 
 export async function createResourceUrl(
@@ -432,6 +441,7 @@ Object.assign(window, {
     mdvrLoadDocument: loadDocument,
     mdvrSearchDocument: searchDocument,
     mdvrApplyAppearance: applyAppearance,
+    mdvrCopyRendered: copyRendered,
     mdvrCopySource: copySource,
     mdvrCreateResourceUrl: createResourceUrl,
 });

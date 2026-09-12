@@ -156,7 +156,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   outline, and theme actions; Escape restores renderer focus. Plain ⌘P returns to
   current-root picker. Live palette exposed all fixed actions. Evidence:
   [command palette](screenshots/command-palette.png).
-- Latest checkpoint verified debug build, 78 Rust tests/clippy and 28 web tests/build.
+- Copy Rendered serializes rendered block text without toolbar labels; live fixture
+  pasted `First\n\nOpen second`. ⌘A selects document root only unless input/select
+  owns focus, then preserves native control behavior. Evidence:
+  [rendered copy and select all](screenshots/rendered-copy-select-all.png).
+- Latest checkpoint verified debug build, 78 Rust tests/clippy and 29 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 
@@ -175,7 +179,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 
 The following remain unverified against a live embedded WKWebView: resize and
 clipping, automated picker text filtering and broader focus transitions,
-cross-block selection and rendered-text clipboard behavior, reload selection/locator
+reload selection/locator
 preservation, non-search action bridge execution, CSP enforcement, Mermaid async output,
 remote resource consent and automated dynamic system-appearance switching.
 

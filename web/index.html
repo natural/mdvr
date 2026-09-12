@@ -33,6 +33,7 @@
       <button type="button" data-open="file">Open File</button>
       <button type="button" data-open="folder">Open Folder</button>
       <button type="button" data-copy-source>Copy Markdown</button>
+      <button type="button" data-copy-rendered>Copy Rendered</button>
     </div>
     <select id="theme" aria-label="Reader theme">
       <option value="system">System</option>
@@ -46,6 +47,7 @@
       <button type="button" data-command="open-folder">Open Folder</button>
       <button type="button" data-command="picker">Browse Current Folder</button>
       <button type="button" data-command="copy-source">Copy Markdown</button>
+      <button type="button" data-command="copy-rendered">Copy Rendered</button>
       <button type="button" data-command="toggle-outline">Toggle Contents</button>
       <button type="button" data-command="theme-system">Use System Theme</button>
       <button type="button" data-command="theme-light">Use Light Theme</button>
@@ -220,6 +222,10 @@
             if (await window.mdvrCopySource?.()) postNativeAction({ kind: 'copy', payload: { kind: 'source' } });
             return;
           }
+          if (event.target.hasAttribute('data-copy-rendered')) {
+            if (await window.mdvrCopyRendered?.()) postNativeAction({ kind: 'copy', payload: { kind: 'rendered' } });
+            return;
+          }
           if (event.target.dataset.open) {
             postNativeAction({ kind: 'open', payload: event.target.dataset.open });
             return;
@@ -243,6 +249,7 @@
           if (command === 'open-file' || command === 'open-folder') postNativeAction({ kind: 'open', payload: command.slice(5) });
           else if (command === 'picker') postNativeAction({ kind: 'open', payload: 'picker' });
           else if (command === 'copy-source' && await window.mdvrCopySource?.()) postNativeAction({ kind: 'copy', payload: { kind: 'source' } });
+          else if (command === 'copy-rendered' && await window.mdvrCopyRendered?.()) postNativeAction({ kind: 'copy', payload: { kind: 'rendered' } });
           else if (command === 'toggle-outline') outlineToggle.click();
           else if (command?.startsWith('theme-')) postNativeAction({ kind: 'theme', payload: command.slice(6) });
           closePalette();
@@ -275,7 +282,16 @@
           else if (button?.dataset.step) moveSearch(button.dataset.step === '-1');
         });
         document.addEventListener('keydown', (event) => {
-          if (event.metaKey && event.key.toLowerCase() === 'p') {
+          const inputOwnsShortcut = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement;
+          if (event.metaKey && event.key.toLowerCase() === 'a' && !inputOwnsShortcut) {
+            event.preventDefault();
+            const range = document.createRange();
+            range.selectNodeContents(document.querySelector('#document'));
+            const selection = window.getSelection();
+            selection?.removeAllRanges();
+            selection?.addRange(range);
+            postNativeAction({ kind: 'select_all' });
+          } else if (event.metaKey && event.key.toLowerCase() === 'p') {
             event.preventDefault();
             if (event.shiftKey) openPalette();
             else postNativeAction({ kind: 'open', payload: 'picker' });

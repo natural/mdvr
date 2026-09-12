@@ -117,9 +117,18 @@ test("outline is generated safely from rendered headings", () => {
 
 test("source copy uses exact Markdown and restores focus selection", () => {
   expect(html).toContain("data-copy-source");
-  expect(main).toContain("navigator.clipboard.writeText(current.source)");
+  expect(main).toContain("return copyText(current?.source");
   expect(main).toContain("selection.getRangeAt(index).cloneRange()");
   expect(main).toContain("active?.focus()");
+});
+
+test("rendered copy excludes controls and select-all targets document only", () => {
+  expect(main).toContain('block.text).join("\\n\\n")');
+  expect(html).toContain("data-copy-rendered");
+  expect(html).toContain(
+    "range.selectNodeContents(document.querySelector('#document'))",
+  );
+  expect(html).toContain("!inputOwnsShortcut");
 });
 
 test("code copy uses exact model source with clipboard fallback", () => {
