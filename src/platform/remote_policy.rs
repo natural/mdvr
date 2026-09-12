@@ -272,19 +272,33 @@ fn is_blocked_address(address: IpAddr) -> bool {
 }
 
 fn is_blocked_ipv4(address: Ipv4Addr) -> bool {
+    let [a, b, c, _] = address.octets();
     address.is_private()
         || address.is_loopback()
         || address.is_link_local()
         || address.is_unspecified()
         || address.is_broadcast()
+        || (a == 100 && (64..=127).contains(&b))
+        || (a == 192 && b == 0 && c == 0)
+        || (a == 192 && b == 0 && c == 2)
+        || (a == 198 && (b == 18 || b == 19))
+        || (a == 198 && b == 51 && c == 100)
+        || (a == 203 && b == 0 && c == 113)
+        || a >= 224
 }
 
 fn is_blocked_ipv6(address: Ipv6Addr) -> bool {
-    let first = address.segments()[0];
+    let segments = address.segments();
+    let first = segments[0];
     address.is_loopback()
         || address.is_unspecified()
         || (first & 0xfe00) == 0xfc00
         || (first & 0xffc0) == 0xfe80
+        || (first & 0xff00) == 0xff00
+        || (segments[0] == 0x0064 && segments[1] == 0xff9b)
+        || (segments[0] == 0x2001 && segments[1] == 0)
+        || (segments[0] == 0x2001 && segments[1] == 0x0db8)
+        || segments[0] == 0x2002
 }
 
 #[cfg(test)]
@@ -349,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_private_loopback_and_link_local_ipv4_literals() {
+    fn rejects_non_public_ipv4_literals() {
         let policy = policy();
         for host in [
             "10.0.0.1",
@@ -357,6 +371,13 @@ mod tests {
             "192.168.1.1",
             "169.254.1.1",
             "127.0.0.1",
+            "100.64.0.1",
+            "192.0.2.1",
+            "198.18.0.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "224.0.0.1",
+            "240.0.0.1",
         ] {
             assert!(matches!(
                 policy.authorize(&format!("http://{host}/image.png")),
@@ -366,13 +387,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_private_loopback_and_link_local_ipv6_literals() {
+    fn rejects_non_public_ipv6_literals() {
         let policy = policy();
         for host in [
             "::1",
             "fc00::1",
             "fd12:3456::1",
             "fe80::1",
+            "ff02::1",
+            "64:ff9b::127.0.0.1",
+            "2001::1",
+            "2001:db8::1",
+            "2002::1",
             "::ffff:127.0.0.1",
         ] {
             assert!(matches!(

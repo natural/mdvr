@@ -216,8 +216,9 @@ context; approval rendered it. Evidence:
 [approved resource](screenshots/outside-resource-approved.png).
 Remote images are blocked until a per-document native alert is approved; live
 packaged-app evidence confirms that alert: [remote consent](screenshots/remote-consent.png).
-Native fetching resolves and rejects every private destination before creating a
-client pinned to validated addresses, disables proxy/cookies/automatic redirects,
+Native fetching rejects private, loopback, link-local, CGNAT, documentation,
+benchmark, multicast, reserved, and transition destinations before creating a client
+pinned to validated addresses; it disables proxy/cookies/automatic redirects,
 revalidates manual redirects, limits time/body/count/concurrency, and accepts only
 static-image MIME types. Automated policy/fetch tests pass; integrated fetched-image
 rendering remains without live evidence. Local non-Markdown routing canonicalizes

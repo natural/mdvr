@@ -62,7 +62,8 @@ outside-root deny/explicit grant, and size-limit changes after authorization.
 `src/platform/remote_policy.rs` and `remote_fetch.rs` implement native remote-image
 transport. It accepts credential-free HTTP(S) only; rejects malformed schemes,
 fragments, userinfo, and overlong URLs; resolves each destination before connect;
-rejects every private, loopback, link-local, unspecified, broadcast, or mapped-private
+rejects every private, loopback, link-local, carrier-grade NAT, documentation,
+benchmark, multicast, reserved, unspecified, broadcast, transition, or mapped-private
 result; and pins the HTTP client to those validated socket addresses to prevent a
 validation/connect race. Redirects are disabled in the client and followed manually
 only after resolving and validating each target. Proxy discovery, cookies, and browser
