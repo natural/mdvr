@@ -276,7 +276,7 @@
         const searchCase = search.querySelector('[data-case]');
         const moveSearch = (backwards = false) => {
           if (!searchInput.value) return;
-          window.find(searchInput.value, searchCase.checked, backwards, true, false, false, false);
+          window.mdvrFind?.(searchInput.value, searchCase.checked, backwards);
           postNativeAction({ kind: 'search', payload: { kind: 'open', payload: { query: searchInput.value, case_sensitive: searchCase.checked } } });
           postNativeAction({ kind: 'search', payload: { kind: backwards ? 'previous' : 'next' } });
         };
@@ -288,8 +288,9 @@
         };
         const closeSearch = () => {
           search.hidden = true;
-          document.querySelector('#document').focus();
+          window.mdvrRestoreSearchSelection?.();
           postNativeAction({ kind: 'search', payload: { kind: 'close' } });
+          postNativeAction({ kind: 'focus', payload: 'renderer' });
         };
         search.addEventListener('submit', (event) => { event.preventDefault(); moveSearch(event.shiftKey); });
         search.addEventListener('click', (event) => {

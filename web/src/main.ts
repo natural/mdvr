@@ -369,6 +369,7 @@ export function loadDocument(source: string, generation = 1): RenderModel {
     const model = renderDocument(source, { generation });
     current = model;
     mountDocument(root, model);
+    domSearch = { query: "", caseSensitive: false, ranges: [], index: -1 };
     setTimeout(() => {
         (
             window as Window & {
@@ -451,12 +452,92 @@ export async function createResourceUrl(
     return URL.createObjectURL(new Blob([body], { type: mime }));
 }
 
+let domSearch = {
+    query: "",
+    caseSensitive: false,
+    ranges: [] as Range[],
+    index: -1,
+};
+
+export function findInDocument(
+    query: string,
+    caseSensitive = false,
+    backwards = false,
+): boolean {
+    if (!query) return false;
+    if (
+        domSearch.query !== query ||
+        domSearch.caseSensitive !== caseSensitive
+    ) {
+        root.querySelectorAll("mark[data-mdvr-search]").forEach((mark) =>
+            mark.replaceWith(...Array.from(mark.childNodes)),
+        );
+        root.normalize();
+        const ranges: Range[] = [];
+        const needle = caseSensitive ? query : query.toLocaleLowerCase();
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const text = node.textContent ?? "";
+            const haystack = caseSensitive ? text : text.toLocaleLowerCase();
+            for (let from = 0; from <= haystack.length - needle.length; ) {
+                const index = haystack.indexOf(needle, from);
+                if (index < 0) break;
+                const range = document.createRange();
+                range.setStart(node, index);
+                range.setEnd(node, index + query.length);
+                ranges.push(range);
+                from = index + Math.max(needle.length, 1);
+            }
+        }
+        for (let index = ranges.length - 1; index >= 0; index--) {
+            const mark = document.createElement("mark");
+            mark.dataset.mdvrSearch = "";
+            ranges[index]!.surroundContents(mark);
+        }
+        const markedRanges = Array.from(
+            root.querySelectorAll("mark[data-mdvr-search]"),
+            (mark) => {
+                const range = document.createRange();
+                range.selectNodeContents(mark);
+                return range;
+            },
+        );
+        domSearch = {
+            query,
+            caseSensitive,
+            ranges: markedRanges,
+            index: -1,
+        };
+    }
+    if (!domSearch.ranges.length) return false;
+    domSearch.index =
+        (domSearch.index + (backwards ? -1 : 1) + domSearch.ranges.length) %
+        domSearch.ranges.length;
+    const range = domSearch.ranges[domSearch.index]!;
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    range.startContainer.parentElement?.scrollIntoView({ block: "center" });
+    return true;
+}
+
+export function restoreSearchSelection(): boolean {
+    const range = domSearch.ranges[domSearch.index];
+    if (!range) return false;
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return true;
+}
+
 export function searchDocument(query: string, caseSensitive = false) {
     return current ? searchRendered(current, query, caseSensitive) : [];
 }
 
 Object.assign(window, {
+    mdvrFind: findInDocument,
     mdvrLoadDocument: loadDocument,
+    mdvrRestoreSearchSelection: restoreSearchSelection,
     mdvrSearchDocument: searchDocument,
     mdvrApplyAppearance: applyAppearance,
     mdvrCopyRendered: copyRendered,

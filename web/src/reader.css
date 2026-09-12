@@ -193,6 +193,12 @@ body {
   padding: 0.5rem 0.8rem;
 }
 
+::selection,
+.reader mark[data-mdvr-search] {
+  background: color-mix(in srgb, var(--reader-accent) 35%, transparent);
+  color: inherit;
+}
+
 .reader :where(a, button, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--reader-focus);
   outline-offset: 3px;

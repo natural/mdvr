@@ -95,8 +95,13 @@ test("document search is keyboard accessible and wraps", () => {
   expect(html).toContain('role="search"');
   expect(html).toContain("event.metaKey && event.key.toLowerCase() === 'f'");
   expect(html).toContain(
-    "window.find(searchInput.value, searchCase.checked, backwards, true",
+    "window.mdvrFind?.(searchInput.value, searchCase.checked, backwards)",
   );
+  expect(main).toContain(
+    "document.createTreeWalker(root, NodeFilter.SHOW_TEXT)",
+  );
+  expect(main).toContain('mark.dataset.mdvrSearch = ""');
+  expect(html).toContain("window.mdvrRestoreSearchSelection?.()");
   expect(html).toContain("case_sensitive: searchCase.checked");
   expect(html).toContain("event.key === 'Escape'");
 });
