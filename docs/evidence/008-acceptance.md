@@ -83,10 +83,12 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   heading IDs. Live outline expanded with `mdvr` and `Development`; selecting
   `Development` drove validated anchor navigation and changed scroll position.
   Evidence: [outline](screenshots/outline.png).
-- Reload now captures first visible stable block plus viewport offset and exact
+- Reload captures first visible stable block plus viewport offset and exact
   selection text before DOM replacement, restores matching block offset, and
-  recreates unchanged selection across text nodes without moving focus. Source
-  regression check exists; live scrolled/selection evidence remains open.
+  recreates unchanged selection across text nodes without moving focus. Live
+  document stayed at paragraphs 26–Target after editing paragraph 0 and reload.
+  Evidence: [reload position](screenshots/reload-position.png). Unchanged-selection
+  restoration retains source regression coverage; dedicated live selection proof remains open.
 - Directory launch now starts ignore-aware discovery off GPUI thread, applies
   bounded progressive batches to native picker state, and opens selected files
   into same window. Missing GPUI `font-kit` feature caused invisible text; enabling
@@ -189,8 +191,8 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 ## Unverified desktop behavior
 
 The following remain unverified against a live embedded WKWebView: resize and
-clipping, automated picker text filtering and broader focus transitions, reload
-selection/locator preservation, remote resource consent, and automated dynamic
+clipping, automated picker text filtering and broader focus transitions, live
+reload selection preservation, remote resource consent, and automated dynamic
 system-appearance switching. Hostile-content and restricted-file startup probes
 cover CSP-sensitive script/network paths, but no independent CSP report capture exists.
 
