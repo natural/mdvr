@@ -95,8 +95,9 @@ test("document search is keyboard accessible and wraps", () => {
   expect(html).toContain('role="search"');
   expect(html).toContain("event.metaKey && event.key.toLowerCase() === 'f'");
   expect(html).toContain(
-    "window.find(searchInput.value, false, backwards, true",
+    "window.find(searchInput.value, searchCase.checked, backwards, true",
   );
+  expect(html).toContain("case_sensitive: searchCase.checked");
   expect(html).toContain("event.key === 'Escape'");
 });
 

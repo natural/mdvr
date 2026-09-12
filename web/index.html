@@ -10,7 +10,7 @@
       body { margin: 0; background: Canvas; color: CanvasText; }
       #search { position: fixed; z-index: 2; top: .75rem; right: .75rem; display: flex; gap: .35rem; padding: .45rem; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius: .4rem; background: Canvas; box-shadow: 0 .2rem .8rem #0004; }
       #search[hidden] { display: none; }
-      #search input { width: 16rem; font: inherit; }
+      #search input[type="search"] { width: 16rem; font: inherit; }
       #search button { font: inherit; }
       #outline-toggle { position: fixed; z-index: 2; left: .75rem; top: .75rem; font: inherit; }
       #history { position: fixed; z-index: 2; left: 7rem; top: .75rem; display: flex; gap: .25rem; }
@@ -53,6 +53,7 @@
     </div>
     <form id="search" role="search" hidden>
       <label><span class="visually-hidden">Find in document</span><input type="search" autocomplete="off" placeholder="Find in document"></label>
+      <label><input type="checkbox" data-case> Match case</label>
       <button type="button" data-step="-1" aria-label="Previous match">↑</button>
       <button type="button" data-step="1" aria-label="Next match">↓</button>
       <button type="button" data-close aria-label="Close search">×</button>
@@ -247,10 +248,12 @@
           closePalette();
         });
         const search = document.querySelector('#search');
-        const searchInput = search.querySelector('input');
+        const searchInput = search.querySelector('input[type="search"]');
+        const searchCase = search.querySelector('[data-case]');
         const moveSearch = (backwards = false) => {
           if (!searchInput.value) return;
-          window.find(searchInput.value, false, backwards, true, false, false, false);
+          window.find(searchInput.value, searchCase.checked, backwards, true, false, false, false);
+          postNativeAction({ kind: 'search', payload: { kind: 'open', payload: { query: searchInput.value, case_sensitive: searchCase.checked } } });
           postNativeAction({ kind: 'search', payload: { kind: backwards ? 'previous' : 'next' } });
         };
         const openSearch = () => {

@@ -70,7 +70,8 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   reader text and preserved scale while saving paths. Evidence:
   [preferences appearance](screenshots/preferences-appearance.png).
 - Embedded ⌘F opens a keyboard-accessible search surface; Enter/Shift-Enter and
-  buttons move wrapped literal matches, Escape closes and restores document focus.
+  buttons move wrapped literal matches, Match case controls comparison, and Escape
+  closes and restores document focus.
   Live WKWebView found and selected `GPUI`; revision-1 search actions reached native
   bridge context. Evidence: [search](screenshots/search.png).
 - Every fenced block exposes an accessible Copy button. Live WKWebView copy of
