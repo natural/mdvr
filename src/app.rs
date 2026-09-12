@@ -1,7 +1,11 @@
 use std::{
     collections::VecDeque,
     path::PathBuf,
-    sync::{Arc, Mutex, OnceLock, atomic::AtomicBool},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::AtomicBool,
+        mpsc::{Receiver, Sender, channel},
+    },
     time::{Duration, Instant},
 };
 
@@ -14,8 +18,8 @@ use crate::{
     LaunchPlan,
     contracts::{
         ActionMessage, ActionMessageEnvelope, ErrorCode, Generation, NavigationRequest,
-        NavigationTarget, ResourceReference, ResourceRequest, ResourceResult, ResourceResultValue,
-        RootId, ScanId, SearchAction,
+        NavigationTarget, ResourceKind, ResourceReference, ResourceRequest, ResourceResult,
+        ResourceResultValue, RootId, ScanId, SearchAction,
     },
     files::{
         DiscoveryEvent, DiscoveryScanner, LARGE_SOURCE_CONFIRM_BYTES, LoadError, LoadedSource,
@@ -26,7 +30,8 @@ use crate::{
         EmbeddedWebView,
         bridge::{BridgeContext, BridgeMessage},
         choose_directory, choose_json_file, choose_markdown_file, confirm_outside_resource,
-        drain_bridge_messages, file_url_path, open_external_url,
+        confirm_remote_images, drain_bridge_messages, file_url_path, open_external_url,
+        remote_fetch::fetch_image,
         remote_policy::{RemoteLimits, RemotePolicy},
         resource_policy::{ResourceAuthorization, ResourceDenied, ResourcePolicy},
         update_bridge_context,
@@ -204,10 +209,15 @@ struct MdvrView {
     startup_error: Option<String>,
     theme_family: Option<ThemeFamily>,
     render_started: Option<Instant>,
+    remote_consent: Option<(crate::contracts::DocumentId, bool)>,
+    remote_results: Receiver<ResourceResult>,
+    remote_sender: Sender<ResourceResult>,
+    remote_in_flight: usize,
 }
 
 impl MdvrView {
     fn new(shell: ShellState, navigation: NavigationState, cx: &mut Context<Self>) -> Self {
+        let (remote_sender, remote_results) = channel();
         let picker_focus = cx.focus_handle();
         let bridge_task = cx.spawn(async move |view, cx| {
             loop {
@@ -238,6 +248,10 @@ impl MdvrView {
             startup_error: None,
             theme_family: None,
             render_started: None,
+            remote_consent: None,
+            remote_results,
+            remote_sender,
+            remote_in_flight: 0,
         };
         let context = view
             .navigation
@@ -452,6 +466,9 @@ impl MdvrView {
     }
 
     fn document_committed(&mut self, context: BridgeContext) {
+        if self.remote_consent.map(|(document, _)| document) != context.document {
+            self.remote_consent = None;
+        }
         self.bridge_context = context;
         self.render_started = context.document.map(|_| Instant::now());
         update_bridge_context(context);
@@ -610,6 +627,14 @@ impl MdvrView {
     }
 
     fn drain_bridge_messages(&mut self, cx: &mut Context<Self>) {
+        while let Ok(result) = self.remote_results.try_recv() {
+            self.remote_in_flight = self.remote_in_flight.saturating_sub(1);
+            if Some(result.document) == self.bridge_context.document
+                && Some(result.generation) == self.bridge_context.generation
+            {
+                self.deliver_resource_result(result);
+            }
+        }
         self.pending_open.extend(drain_open_paths());
         if !self.pending_open.is_empty() {
             cx.notify();
@@ -749,6 +774,19 @@ impl MdvrView {
     }
 
     fn dispatch_resource(&mut self, request: ResourceRequest) {
+        if request.kind != ResourceKind::Image {
+            self.deliver_resource_result(ResourceResult {
+                request: request.request,
+                resource: request.resource,
+                document: request.document,
+                generation: request.generation,
+                result: ResourceResultValue::Denied {
+                    code: ErrorCode::Unsupported,
+                },
+            });
+            return;
+        }
+
         let result = match (&mut self.resource_policy, &request.reference) {
             (Some(policy), ResourceReference::RelativePath { value }) => {
                 let reference = std::path::Path::new(value);
@@ -779,18 +817,71 @@ impl MdvrView {
                     },
                 }
             }
+            (Some(_), ResourceReference::RemoteUrl { value }) => {
+                let valid = RemotePolicy::new(RemoteLimits::default())
+                    .and_then(|policy| policy.authorize(value))
+                    .is_ok();
+                let consent = valid
+                    && match self.remote_consent {
+                        Some((document, true)) if document == request.document => true,
+                        _ => {
+                            let allowed = confirm_remote_images(value);
+                            self.remote_consent = Some((request.document, allowed));
+                            allowed
+                        }
+                    };
+                if !consent {
+                    ResourceResultValue::Denied {
+                        code: ErrorCode::Denied,
+                    }
+                } else if self.remote_in_flight >= 4 {
+                    ResourceResultValue::Denied {
+                        code: ErrorCode::Internal,
+                    }
+                } else {
+                    self.remote_in_flight += 1;
+                    let sender = self.remote_sender.clone();
+                    let url = value.clone();
+                    std::thread::spawn(move || {
+                        let result = RemotePolicy::new(RemoteLimits::default())
+                            .map_err(Into::into)
+                            .and_then(|policy| fetch_image(&policy, &url))
+                            .map_or_else(
+                                |error| {
+                                    eprintln!("mdvr: remote image failed: {error:?}");
+                                    ResourceResultValue::Denied {
+                                        code: ErrorCode::Internal,
+                                    }
+                                },
+                                |(mime, bytes)| ResourceResultValue::Bytes { mime, bytes },
+                            );
+                        let _ = sender.send(ResourceResult {
+                            request: request.request,
+                            resource: request.resource,
+                            document: request.document,
+                            generation: request.generation,
+                            result,
+                        });
+                    });
+                    return;
+                }
+            }
             _ => ResourceResultValue::Denied {
                 code: ErrorCode::Unsupported,
             },
         };
+        self.deliver_resource_result(ResourceResult {
+            request: request.request,
+            resource: request.resource,
+            document: request.document,
+            generation: request.generation,
+            result,
+        });
+    }
+
+    fn deliver_resource_result(&self, result: ResourceResult) {
         if let Some(web_view) = self.web_view.as_ref()
-            && let Err(error) = web_view.deliver_resource(ResourceResult {
-                request: request.request,
-                resource: request.resource,
-                document: request.document,
-                generation: request.generation,
-                result,
-            })
+            && let Err(error) = web_view.deliver_resource(result)
         {
             eprintln!("mdvr: cannot deliver resource: {error}");
         }

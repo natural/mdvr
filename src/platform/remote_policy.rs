@@ -98,6 +98,14 @@ impl RemotePolicy {
         Ok(request)
     }
 
+    pub fn validate_destination(&self, address: IpAddr) -> Result<(), RemotePolicyError> {
+        if is_blocked_address(address) {
+            Err(RemotePolicyError::BlockedAddress(address))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn validate_response_size(&self, bytes: u64) -> Result<(), RemotePolicyError> {
         if bytes > self.limits.max_response_bytes {
             Err(RemotePolicyError::ResponseTooLarge {
@@ -300,6 +308,15 @@ mod tests {
         );
         assert_eq!(request.timeout, DEFAULT_REMOTE_TIMEOUT);
         assert!(policy.authorize("http://example.com").is_ok());
+        assert!(
+            policy
+                .validate_destination("93.184.216.34".parse().unwrap())
+                .is_ok()
+        );
+        assert!(matches!(
+            policy.validate_destination("127.0.0.1".parse().unwrap()),
+            Err(RemotePolicyError::BlockedAddress(_))
+        ));
     }
 
     #[test]

@@ -102,6 +102,7 @@
         let nextResourceId = 1;
         const resourceElements = new Map();
         const resourceUrls = new Set();
+        const remoteResources = [];
         const validNavigationTarget = (target) => {
           if (!target || typeof target !== 'object' || Object.keys(target).length !== 1) return false;
           const [kind] = Object.keys(target);
@@ -156,29 +157,65 @@
           }));
           return true;
         };
+        const requestResource = (placeholder, reference, remote) => {
+          if (!navigationContext) return;
+          const resource = nextResourceId++;
+          resourceElements.set(resource, { placeholder, reference, remote });
+          const envelope = { revision: 1, message: { kind: 'resource.request', payload: {
+            request: nextRequestId++, resource, ...navigationContext, kind: 'image',
+            reference: remote ? { remote_url: { value: reference } } : { relative_path: { value: reference } },
+          } } };
+          window.webkit?.messageHandlers?.mdvr?.postMessage(JSON.stringify(envelope));
+        };
+        const requestNextRemote = () => {
+          const next = remoteResources.shift();
+          if (next) requestResource(next.placeholder, next.reference, true);
+        };
         window.mdvrRequestResources = () => {
           for (const url of resourceUrls) URL.revokeObjectURL(url);
           resourceUrls.clear();
           resourceElements.clear();
+          remoteResources.length = 0;
           if (!navigationContext) return;
           for (const placeholder of document.querySelectorAll('#document [data-mdvr-resource]')) {
             const reference = placeholder.getAttribute('data-mdvr-resource');
-            if (!reference || /^[a-z][a-z0-9+.-]*:/i.test(reference) || reference.startsWith('//')) continue;
-            const resource = nextResourceId++;
-            resourceElements.set(resource, placeholder);
-            const envelope = { revision: 1, message: { kind: 'resource.request', payload: {
-              request: nextRequestId++, resource, ...navigationContext, kind: 'image',
-              reference: { relative_path: { value: reference } },
-            } } };
-            window.webkit?.messageHandlers?.mdvr?.postMessage(JSON.stringify(envelope));
+            if (!reference || reference.startsWith('//')) continue;
+            if (/^https?:\/\//i.test(reference)) remoteResources.push({ placeholder, reference });
+            else if (!/^[a-z][a-z0-9+.-]*:/i.test(reference)) requestResource(placeholder, reference, false);
           }
+          requestNextRemote();
         };
         window.mdvrResolveResource = async (envelope) => {
           const payload = envelope?.message?.kind === 'resource.result' ? envelope.message.payload : null;
           if (!payload || payload.document !== navigationContext?.document || payload.generation !== navigationContext?.generation) return;
-          const placeholder = resourceElements.get(payload.resource);
+          const pending = resourceElements.get(payload.resource);
+          if (!pending) return;
+          resourceElements.delete(payload.resource);
+          const { placeholder, reference, remote } = pending;
           const value = payload.result?.bytes;
-          if (!placeholder || !value || typeof value.mime !== 'string' || !Array.isArray(value.bytes)) return;
+          if (!value || typeof value.mime !== 'string' || !Array.isArray(value.bytes)) {
+            placeholder.setAttribute('role', 'button');
+            placeholder.tabIndex = 0;
+            placeholder.textContent = `[image unavailable — retry]`;
+            const retry = () => {
+              placeholder.removeEventListener('click', retry);
+              placeholder.removeEventListener('keydown', retryKey);
+              placeholder.setAttribute('role', 'img');
+              placeholder.removeAttribute('tabindex');
+              placeholder.textContent = `[image: ${placeholder.getAttribute('aria-label') || 'Image unavailable'}]`;
+              requestResource(placeholder, reference, remote);
+            };
+            const retryKey = (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                retry();
+              }
+            };
+            placeholder.addEventListener('click', retry);
+            placeholder.addEventListener('keydown', retryKey);
+            if (remote && payload.result?.denied?.code !== 'denied') requestNextRemote();
+            return;
+          }
           const url = await window.mdvrCreateResourceUrl?.(value.mime, value.bytes);
           if (!url || payload.document !== navigationContext?.document || payload.generation !== navigationContext?.generation) {
             if (url) URL.revokeObjectURL(url);
@@ -189,7 +226,7 @@
           image.src = url;
           resourceUrls.add(url);
           placeholder.replaceWith(image);
-          resourceElements.delete(payload.resource);
+          if (remote) requestNextRemote();
         };
         window.mdvrNavigateAnchor = (anchor) => {
           const target = document.getElementById(anchor);

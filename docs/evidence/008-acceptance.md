@@ -173,9 +173,9 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   [rendered copy and select all](screenshots/rendered-copy-select-all.png).
 - Renderer posts closed `render.ready` only after synchronous DOM mount; native
   bridge rejects stale document/generation and records commit-to-ready latency.
-- Latest checkpoint verified debug build, 78 Rust tests/clippy and 29 web tests/build.
-  Release/package checks above predate these latest native changes; existing
-  generated package is not evidence for the current source.
+- Latest local verification passed 80 Rust tests/clippy, 29 web tests/build,
+  restricted-file WKWebView probe, current release build, app inspection, and DMG
+  inspection.
 
 ## Launch checks
 
@@ -192,8 +192,8 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 
 The following remain unverified against a live embedded WKWebView: resize and
 clipping, automated picker text filtering and broader focus transitions, live
-reload selection preservation, remote resource consent, and automated dynamic
-system-appearance switching. Hostile-content and restricted-file startup probes
+reload selection preservation, integrated remote-image completion after consent,
+and automated dynamic system-appearance switching. Hostile-content and restricted-file startup probes
 cover CSP-sensitive script/network paths, but no independent CSP report capture exists.
 
 Unit and Bun tests cover the corresponding pure/core behavior but do not close
@@ -208,8 +208,13 @@ showed exact native path consent, then granted only that resource for current
 context; approval rendered it. Evidence:
 [outside consent](screenshots/outside-resource-consent.png),
 [approved resource](screenshots/outside-resource-approved.png).
-Remote consent, DNS resolution and destination/connect-race protection, and actual
-HTTP fetch/redirect handling remain unverified.
+Remote images are blocked until a per-document native alert is approved; live
+packaged-app evidence confirms that alert: [remote consent](screenshots/remote-consent.png).
+Native fetching resolves and rejects every private destination before creating a
+client pinned to validated addresses, disables proxy/cookies/automatic redirects,
+revalidates manual redirects, limits time/body/count/concurrency, and accepts only
+static-image MIME types. Automated policy/fetch tests pass; integrated fetched-image
+rendering remains without live evidence.
 
 ## Performance and distribution
 
@@ -222,8 +227,9 @@ and universal builds are blocked by available arm64-only target/toolchain. Unsig
 read-only DMG mount passed full bundle/Mach-O/framework/icon inspection. Original
 project icon is generated into ICNS. Bundle minimum macOS 11.0 matches release
 Mach-O `LC_BUILD_VERSION` and is enforced by inspection. Deterministic notices
-include license text for all 124 installed web packages and are bundled with
-project license; final legal review remains external. No clean-machine test,
+include license text for all 124 installed web packages plus 96 remote-fetch Cargo
+packages and are bundled with project license; full native GPUI dependency review
+and final legal review remain external. No clean-machine test,
 signing, notarization, or Gatekeeper evidence exists.
 
 Signing/notarization credentials and packaging environment were not created or

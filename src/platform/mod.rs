@@ -3,6 +3,8 @@
 #[allow(dead_code)]
 pub(crate) mod bridge;
 #[allow(dead_code)]
+pub(crate) mod remote_fetch;
+#[allow(dead_code)]
 pub(crate) mod remote_policy;
 #[allow(dead_code)]
 pub(crate) mod resource_policy;
@@ -174,7 +176,7 @@ pub(crate) fn drain_bridge_messages() -> Vec<BridgeMessage> {
 }
 
 /// Update action authorization context after native document commit.
-pub(crate) fn confirm_outside_resource(path: &Path) -> bool {
+fn confirm(title: &str, detail: &str, allow: &str, cancel: &str) -> bool {
     if !main_thread() {
         return false;
     }
@@ -183,14 +185,18 @@ pub(crate) fn confirm_outside_resource(path: &Path) -> bool {
         if alert.is_null() {
             return false;
         }
-        let title = NSString::alloc(nil).init_str("Allow image outside document folder?");
-        let detail = NSString::alloc(nil).init_str(&path.display().to_string());
-        let allow = NSString::alloc(nil).init_str("Allow this image");
-        let cancel = NSString::alloc(nil).init_str("Cancel");
+        let title = NSString::alloc(nil).init_str(title);
+        let detail = NSString::alloc(nil).init_str(detail);
+        let allow = NSString::alloc(nil).init_str(allow);
+        let cancel = NSString::alloc(nil).init_str(cancel);
         let _: () = msg_send![alert, setMessageText: title];
         let _: () = msg_send![alert, setInformativeText: detail];
         let _: id = msg_send![alert, addButtonWithTitle: allow];
         let _: id = msg_send![alert, addButtonWithTitle: cancel];
+        let application: id = msg_send![class!(NSApplication), sharedApplication];
+        let _: () = msg_send![application, activateIgnoringOtherApps: true];
+        let window: id = msg_send![alert, window];
+        let _: () = msg_send![window, makeKeyAndOrderFront: nil];
         let response: isize = msg_send![alert, runModal];
         let _: () = msg_send![title, release];
         let _: () = msg_send![detail, release];
@@ -199,6 +205,24 @@ pub(crate) fn confirm_outside_resource(path: &Path) -> bool {
         let _: () = msg_send![alert, release];
         response == 1000
     }
+}
+
+pub(crate) fn confirm_remote_images(url: &str) -> bool {
+    confirm(
+        "Load remote images for this document?",
+        url,
+        "Load remote images",
+        "Keep blocked",
+    )
+}
+
+pub(crate) fn confirm_outside_resource(path: &Path) -> bool {
+    confirm(
+        "Allow image outside document folder?",
+        &path.display().to_string(),
+        "Allow this image",
+        "Cancel",
+    )
 }
 
 fn choose_path(files: bool, directories: bool, extensions: &[&str]) -> Option<PathBuf> {

@@ -45,9 +45,12 @@ test("GIF resources are frozen to first PNG frame", () => {
   expect(main).toContain('canvas.toBlob(resolve, "image/png")');
 });
 
-test("local images use context-bound native resource requests", () => {
+test("images use context-bound native resource requests", () => {
   expect(html).toContain("kind: 'resource.request'");
-  expect(html).toContain("reference: { relative_path: { value: reference } }");
+  expect(html).toContain("{ remote_url: { value: reference } }");
+  expect(html).toContain("{ relative_path: { value: reference } }");
+  expect(html).toContain("remoteResources.shift()");
+  expect(html).toContain("[image unavailable — retry]");
   expect(html).toContain("window.mdvrResolveResource");
   expect(html).toContain("URL.revokeObjectURL(url)");
 });

@@ -69,10 +69,9 @@ malformed/unsupported URLs, blocks private/loopback/link-local IP literals,
 and requires each redirect target to pass policy before redirect count is
 consumed. `ack_timeout_ms` remains caller intent only.
 
-This core performs no fetch, DNS resolution, socket connection, redirect
-following, or response read. DNS destination validation and validation/connect
-race protection remain explicit gaps, as does per-document remote consent.
-No MIME policy is frozen here.
+The frozen contract remains transport-neutral. Later native integration now owns
+per-document consent, DNS destination validation, pinned-address connection,
+manual redirect following, bounded response reads, and static-image MIME policy.
 
 ## Fixtures
 
@@ -108,8 +107,7 @@ M0 is still blocked/open for real-app evidence: GPUI/WKWebView resize, focus,
 keyboard, close/reopen and activation; live CSP/navigation behavior; selection,
 copy and reload position preservation; production parsing/rendering; bridge
 runtime probes; integration of the tested local canonical-path/symlink policy
-and outside-root grants; remote consent; DNS resolution/destination validation
-and validation/connect-race protection; transport and redirect following;
-malicious HTML/SVG/Mermaid checks; dependency license audit; and universal
+and outside-root grants; malicious HTML/SVG/Mermaid checks; full native dependency
+license audit; and universal
 Intel build feasibility. Therefore this slice is **not an M1 pass, not a claim
 of complete native policy enforcement, and not release evidence.

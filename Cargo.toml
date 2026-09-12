@@ -16,3 +16,4 @@ cocoa = "=0.26.0"
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit"] }
 objc = "=0.2.7"
 raw-window-handle = "=0.6.2"
+reqwest = { version = "=0.12.24", default-features = false, features = ["blocking", "native-tls"] }

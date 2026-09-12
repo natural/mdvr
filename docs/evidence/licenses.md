@@ -1,8 +1,8 @@
 # Dependency and asset license evidence
 
-Updated for production web renderer dependencies. Metadata and bundled license
-files are evidence, not legal advice. Native/Cargo audit remains outside this
-lane.
+Updated for production web renderer and remote-fetch dependencies. Metadata and
+bundled license files are evidence, not legal advice. Full GPUI/native Cargo audit
+remains outside this lane.
 
 ## Locked web dependencies
 
@@ -25,8 +25,9 @@ and `@types/dompurify` 3.2.0 (MIT). They are not renderer runtime assets.
 Mermaid brings its own locked runtime dependency graph, including parser,
 Chevrotain, D3, Cytoscape, ELK, KaTeX, and DOMPurify packages. Their versions,
 integrity hashes, and dependency relationships are recorded in `bun.lock`.
-`THIRD_PARTY_NOTICES.md` deterministically inventories 124 installed packages
-and includes every discovered license/notice text with zero missing files.
+`THIRD_PARTY_NOTICES.md` deterministically inventories 124 installed web packages
+and 96 Cargo packages in the pinned `reqwest` remote-fetch graph. Every listed
+package includes discovered license/notice text with zero missing files.
 
 ## Bundling and network facts
 
@@ -34,7 +35,8 @@ and includes every discovered license/notice text with zero missing files.
   modules. `bun build ./index.html --outdir dist --minify` bundles production
   dependencies; no CDN or runtime grammar fetch is used.
 - `web/index.html` has `connect-src 'none'`, `default-src 'none'`, restrictive
-  script/style policy, and no remote script/source URL.
+  script/style policy, and no remote script/source URL. Approved remote images are
+  fetched only by native pinned-address transport and returned as bounded bytes.
 - DOMPurify sanitizes browser output; pure Bun tests use its small deterministic
   fallback because Bun test has no DOM. Renderer-generated Mermaid SVG is
   separately stripped of executable and external-reference attributes.
@@ -63,6 +65,7 @@ bun test tests
 bun run build
 cd ..
 bun scripts/verify/generate-notices.mjs
+! grep -q '| missing |' THIRD_PARTY_NOTICES.md
 ```
 
 Inspect resolved metadata and license files before release:

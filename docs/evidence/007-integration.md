@@ -57,33 +57,28 @@ outside-root deny/explicit grant, and size-limit changes after authorization.
 
 ## Remote policy core
 
-`src/platform/remote_policy.rs` is wired into `src/platform/mod.rs` as a pure
-policy/data layer. It accepts credential-free HTTP(S) only; rejects malformed
-or unsupported schemes, fragments, userinfo, and overlong URLs; blocks private,
-loopback, link-local, unspecified, and mapped-private IP literals; and carries
-finite defaults of 2 KiB URL, five redirects, 8 MiB response, and 10 second
-request timeout. `authorize_redirect` validates every target before allowing a
-redirect under the count limit. No HTTP client or arbitrary network operation
-was added.
+`src/platform/remote_policy.rs` and `remote_fetch.rs` implement native remote-image
+transport. It accepts credential-free HTTP(S) only; rejects malformed schemes,
+fragments, userinfo, and overlong URLs; resolves each destination before connect;
+rejects every private, loopback, link-local, unspecified, broadcast, or mapped-private
+result; and pins the HTTP client to those validated socket addresses to prevent a
+validation/connect race. Redirects are disabled in the client and followed manually
+only after resolving and validating each target. Proxy discovery, cookies, and browser
+credentials are disabled. Limits remain 2 KiB URL, five redirects, 8 MiB decoded body,
+10 seconds, supported static-image MIME types, and four in-flight requests.
 
-Tests cover public URLs, credentials, schemes, malformed URLs, IPv4/IPv6
-private/loopback/link-local literals, redirect limits, response limits, and
-finite timeout configuration.
-
-Explicit gaps: no remote consent flow; no DNS resolution or DNS destination
-validation; no validation/connect-race protection; no socket, fetch, response
-read, or redirect-following integration. Native handler accepts only validated
-contract actions into an internal queue; no arbitrary file-read operation was added.
+The first remote image opens explicit consent for the current document only. Consent
+is never persisted and resets when document identity changes. Fetches run off the GPUI
+thread; stale-generation results are discarded. Failed images expose keyboard/click
+retry. Tests cover URL/address policy, private DNS results before connect, MIME policy,
+redirect/response limits, and renderer request/retry shape. Live packaged-app evidence
+confirms the consent alert: [remote consent](screenshots/remote-consent.png).
 
 ## Explicit non-claims and gaps
 
-This is not full picker, file, launch IPC, `DocumentLoad` bridge, Markdown
-renderer, remote-consent, DNS/connect-race, or full document-load
-integration. Appearance is exposed as a native helper but app-level preference
-or system-appearance event wiring remains outside this slice. The bundled page
-remains a static fixture and does not prove live WebKit policy, focus, resize,
-close/reopen, selection, or clipboard behavior. No speculative Objective-C API
-was added.
+Remaining integration evidence gaps are listed in `008-acceptance.md`; this file no
+longer treats completed picker, renderer, bridge, appearance, resource, or remote-image
+work as unintegrated slices.
 
 ## Verification
 
