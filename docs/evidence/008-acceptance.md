@@ -282,8 +282,10 @@ totals including poll/debounce were 331.9, 327.8, 318.0, 312.9, and 321.7 ms
 (median 321.7 ms). This meets the <200 ms post-debounce target by median on the provisional M2 Pro,
 not the unavailable M1 baseline. Rustup 1.29.1 supplied pinned Rust 1.98.1 arm64
 and x86_64 targets; both release slices compiled and `lipo` produced verified
-`x86_64 arm64` app and compressed DMG. The universal binary runs through its arm64
-slice here; Intel runtime remains unverified without Intel hardware. Read-only DMG
+`x86_64 arm64` app and compressed DMG. Native arm64 launch passes; forcing x86_64
+through Rosetta launched the full GPUI/WKWebView app, rendered `readme.md`, and emitted
+`rendered generation 1 in 469.0 ms`. Physical Intel runtime remains unverified without
+Intel hardware. Read-only DMG
 mount passed full bundle/Mach-O/framework/icon inspection. Pinned
 macOS CI now rebuilds release binary, app, and DMG and reruns mounted-image inspection
 on every push/PR. Original

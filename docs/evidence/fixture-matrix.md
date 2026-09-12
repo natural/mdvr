@@ -28,7 +28,7 @@ Statuses distinguish implementation/tests from required live or release evidence
 | S5–S6 | closed/stale bridge, broker, native scheme/local-file routing tests | hostile/resource/local-file consent evidence | pass |
 | Launch §2 | argument/precedence/Finder/Dock/window/request-file ACK tests | Finder/Dock/CLI reuse and real app-load ACK observed | pass |
 | Performance §8 | release renderer probe and `measure-reload.py` | M2 Pro provisional cold/reload results; M1 baseline and frame capture unavailable | blocked |
-| Distribution §9 | verified `x86_64 arm64` app/DMG, release scripts, CI packaging | Intel runtime, clean host, Developer ID, notarization profile unavailable | blocked |
+| Distribution §9 | verified `x86_64 arm64` app/DMG; x86 app rendered under Rosetta; CI packaging | physical Intel/clean host, Developer ID, notarization profile unavailable | blocked |
 | Licenses | deterministic web + remote-fetch notices, zero listed missing texts | full GPUI/native graph and legal review incomplete | partial |
 
 Exact commands, measurements, screenshots, blockers, and caveats live in
