@@ -42,8 +42,10 @@ bundle_executable=$(plutil -extract CFBundleExecutable raw -o - "$plist")
 bundle_type=$(plutil -extract CFBundlePackageType raw -o - "$plist")
 [ "$bundle_type" = APPL ] || fail "CFBundlePackageType is not APPL: $bundle_type"
 minimum=$(plutil -extract LSMinimumSystemVersion raw -o - "$plist")
-binary_minimum=$(otool -l "$main" | awk '/LC_BUILD_VERSION/{seen=1} seen && /minos/{print $2; exit}')
-[ "$minimum" = "$binary_minimum" ] || fail "minimum macOS mismatch: plist=$minimum binary=$binary_minimum"
+for arch in $(lipo -archs "$main"); do
+    binary_minimum=$(otool -l -arch "$arch" "$main" | awk '/LC_BUILD_VERSION/{seen=1} seen && /minos/{print $2; exit}')
+    [ "$minimum" = "$binary_minimum" ] || fail "minimum macOS mismatch: plist=$minimum $arch=$binary_minimum"
+done
 icon=$(plutil -extract CFBundleIconFile raw -o - "$plist")
 [ "$icon" = AppIcon ] || fail "CFBundleIconFile is not AppIcon: $icon"
 [ -f "$contents/Resources/AppIcon.icns" ] || fail "bundle icon missing"

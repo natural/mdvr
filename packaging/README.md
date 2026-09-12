@@ -85,8 +85,8 @@ and reruns full app inspection before detaching.
   with hardened runtime and timestamping, notarizes/staples app and DMG, then runs
   `codesign`, `stapler`, and Gatekeeper checks. Current keychain lacks Developer ID
   Application/notary credentials, so no signed artifact is claimed.
-- `LSMinimumSystemVersion` is 11.0, matching release Mach-O `LC_BUILD_VERSION`;
-  inspection fails on metadata/binary drift.
+- `LSMinimumSystemVersion` and `MACOSX_DEPLOYMENT_TARGET` are 11.0, matching both
+  release Mach-O slices; inspection fails on metadata/binary drift.
 - Native code resolves production assets from `Contents/Resources/web` in the
   app bundle, with `web/dist` as dev-checkout fallback. `WKWebView::loadFileURL`
   grants read access only to that canonical asset directory; navigation allows

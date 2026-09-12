@@ -289,8 +289,9 @@ Intel hardware. Read-only DMG
 mount passed full bundle/Mach-O/framework/icon inspection. Pinned
 macOS CI now rebuilds release binary, app, and DMG and reruns mounted-image inspection
 on every push/PR. Original
-project icon is generated into ICNS. Bundle minimum macOS 11.0 matches release
-Mach-O `LC_BUILD_VERSION` and is enforced by inspection. Deterministic notices
+project icon is generated into ICNS. Universal build pins
+`MACOSX_DEPLOYMENT_TARGET=11.0`; bundle minimum matches both arm64 and x86_64
+`LC_BUILD_VERSION` values and inspection enforces each slice. Deterministic notices
 include license text for all 124 installed web packages plus 96 remote-fetch Cargo
 packages and are bundled with project license; full native GPUI dependency review
 and final legal review remain external. No clean-machine test,

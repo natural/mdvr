@@ -3,6 +3,8 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 out="$root/target/release/mdvr"
+MACOSX_DEPLOYMENT_TARGET=11.0
+export MACOSX_DEPLOYMENT_TARGET
 
 if [ -x /opt/homebrew/opt/rustup/bin/rustup ]; then
     PATH=/opt/homebrew/opt/rustup/bin:$PATH
