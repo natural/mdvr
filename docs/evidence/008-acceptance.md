@@ -176,7 +176,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   [rendered copy and select all](screenshots/rendered-copy-select-all.png).
 - Renderer posts closed `render.ready` only after synchronous DOM mount; native
   bridge rejects stale document/generation and records commit-to-ready latency.
-- Latest local verification passed 80 Rust tests/clippy, 29 web tests/build,
+- Latest local verification passed 81 Rust tests/clippy, 29 web tests/build,
   restricted-file WKWebView probe, current release build, app inspection, and DMG
   inspection.
 
@@ -220,7 +220,10 @@ Native fetching resolves and rejects every private destination before creating a
 client pinned to validated addresses, disables proxy/cookies/automatic redirects,
 revalidates manual redirects, limits time/body/count/concurrency, and accepts only
 static-image MIME types. Automated policy/fetch tests pass; integrated fetched-image
-rendering remains without live evidence.
+rendering remains without live evidence. Local non-Markdown routing canonicalizes
+before dispatch: images open through `NSWorkspace`, other regular files require
+exact-path native confirmation, and executable-mode files/directories are denied.
+Automated executable-policy coverage passes; live external-app dispatch remains open.
 
 ## Performance and distribution
 

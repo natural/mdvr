@@ -12,6 +12,7 @@ pub(crate) mod resource_policy;
 use std::{
     ffi::CStr,
     fs,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     slice,
     sync::{
@@ -223,6 +224,42 @@ pub(crate) fn confirm_outside_resource(path: &Path) -> bool {
         "Allow this image",
         "Cancel",
     )
+}
+
+fn canonical_safe_local_file(path: &Path) -> Option<PathBuf> {
+    let path = path.canonicalize().ok()?;
+    let metadata = path.metadata().ok()?;
+    (metadata.is_file() && metadata.permissions().mode() & 0o111 == 0).then_some(path)
+}
+
+pub(crate) fn open_local_file(path: &Path, require_confirmation: bool) -> bool {
+    if !main_thread() {
+        return false;
+    }
+    let Some(path) = canonical_safe_local_file(path) else {
+        return false;
+    };
+    if require_confirmation
+        && !confirm(
+            "Open this local file in its default app?",
+            &path.display().to_string(),
+            "Open File",
+            "Cancel",
+        )
+    {
+        return false;
+    }
+    unsafe {
+        let value = NSString::alloc(nil).init_str(&path.display().to_string());
+        let target: id = msg_send![class!(NSURL), fileURLWithPath: value];
+        let _: () = msg_send![value, release];
+        if target.is_null() {
+            return false;
+        }
+        let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let opened: BOOL = msg_send![workspace, openURL: target];
+        opened
+    }
 }
 
 fn choose_path(files: bool, directories: bool, extensions: &[&str]) -> Option<PathBuf> {
@@ -1017,6 +1054,18 @@ impl Drop for EmbeddedWebView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_file_policy_rejects_executables() {
+        let path = std::env::temp_dir().join(format!("mdvr-local-file-{}", std::process::id()));
+        fs::write(&path, b"safe").unwrap();
+        assert_eq!(canonical_safe_local_file(&path), path.canonicalize().ok());
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions).unwrap();
+        assert_eq!(canonical_safe_local_file(&path), None);
+        fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn webkit_callback_classes_register_without_requiring_protocol_metadata() {

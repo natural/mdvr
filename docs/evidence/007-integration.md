@@ -25,7 +25,9 @@ Status: **bridge dispatch slice implemented; M2 not passed**.
 - Native bridge exposes a typed queue for action and navigation envelopes. GPUI
   drains actions and renderer navigation requests; `NavigationState` resolves
   anchors, local Markdown, external URLs, and non-Markdown targets, and commits
-  local loads only after successful bounded reads. History/current state remains
+  local loads only after successful bounded reads. Non-Markdown images open through
+  `NSWorkspace`; other regular local files require exact-path confirmation, while
+  directories and executable-mode files are blocked. History/current state remains
   unchanged on failed or stale loads.
 - GPUI render maps search/focus/copy/select-all through `ShellState`;
   copy/select-all require renderer or search-input focus.

@@ -31,6 +31,7 @@ use crate::{
         bridge::{BridgeContext, BridgeMessage},
         choose_directory, choose_json_file, choose_markdown_file, confirm_outside_resource,
         confirm_remote_images, drain_bridge_messages, file_url_path, open_external_url,
+        open_local_file,
         remote_fetch::fetch_image,
         remote_policy::{RemoteLimits, RemotePolicy},
         resource_policy::{ResourceAuthorization, ResourceDenied, ResourcePolicy},
@@ -923,7 +924,11 @@ impl MdvrView {
                     }
                 }
                 NavigationTarget::LocalFile { path } => {
-                    eprintln!("mdvr: local non-Markdown file requires confirmation: {path}");
+                    let path = PathBuf::from(&path);
+                    let image = resource_mime(&path.to_string_lossy()).is_some();
+                    if !open_local_file(&path, !image) {
+                        eprintln!("mdvr: local file rejected");
+                    }
                 }
                 NavigationTarget::Anchor { .. } | NavigationTarget::Markdown { .. } => {
                     unreachable!("local targets are handled before external policy")
