@@ -63,8 +63,9 @@ test("theme chooser sends only closed native choices", () => {
   expect(html).toContain('aria-label="Reader theme"');
   expect(html).toContain("kind: 'theme'");
   expect(html).toContain(
-    "['system', 'light', 'dark'].includes(action.payload)",
+    "['system', 'light', 'dark', 'import'].includes(action.payload)",
   );
+  expect(html).toContain("action.payload?.named");
   expect(main).toContain("theme.value = value.mode");
 });
 

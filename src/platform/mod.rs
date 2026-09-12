@@ -174,6 +174,35 @@ pub(crate) fn drain_bridge_messages() -> Vec<BridgeMessage> {
 }
 
 /// Update action authorization context after native document commit.
+pub(crate) fn choose_json_file() -> Option<PathBuf> {
+    if !main_thread() {
+        return None;
+    }
+    unsafe {
+        let panel: id = msg_send![class!(NSOpenPanel), openPanel];
+        if panel.is_null() {
+            eprintln!("mdvr: NSOpenPanel unavailable");
+            return None;
+        }
+        let _: () = msg_send![panel, setCanChooseFiles: true];
+        let _: () = msg_send![panel, setCanChooseDirectories: false];
+        let _: () = msg_send![panel, setAllowsMultipleSelection: false];
+        let extension = NSString::alloc(nil).init_str("json");
+        let types: id = msg_send![class!(NSArray), arrayWithObject: extension];
+        let _: () = msg_send![panel, setAllowedFileTypes: types];
+        let _: () = msg_send![extension, release];
+        let response: isize = msg_send![panel, runModal];
+        if response != 1 {
+            eprintln!("mdvr: theme picker cancelled ({response})");
+            return None;
+        }
+        let url: id = msg_send![panel, URL];
+        let path: id = msg_send![url, path];
+        let bytes: *const std::os::raw::c_char = msg_send![path, UTF8String];
+        (!bytes.is_null()).then(|| PathBuf::from(CStr::from_ptr(bytes).to_string_lossy().as_ref()))
+    }
+}
+
 pub(crate) fn file_url_path(url: &str) -> Option<PathBuf> {
     if !main_thread() || url.contains(char::is_control) {
         return None;
@@ -405,6 +434,7 @@ struct PendingPage {
     source: Option<PendingSource>,
     appearance: Option<PendingAppearance>,
     context: Option<PendingContext>,
+    theme_choices: Option<String>,
 }
 
 #[derive(Default)]
@@ -415,6 +445,7 @@ struct PendingPageState {
     source: Option<PendingSource>,
     appearance: Option<PendingAppearance>,
     context: Option<PendingContext>,
+    theme_choices: Option<String>,
 }
 
 impl PendingPageState {
@@ -425,6 +456,7 @@ impl PendingPageState {
         self.source = None;
         self.appearance = None;
         self.context = None;
+        self.theme_choices = None;
     }
 
     fn page_ready(&self) -> bool {
@@ -503,6 +535,7 @@ impl PendingPageState {
             source: self.source.take(),
             appearance: self.appearance.take(),
             context: self.context.take(),
+            theme_choices: self.theme_choices.take(),
         }
     }
 
@@ -513,6 +546,9 @@ impl PendingPageState {
                 web_view,
                 &navigation_context_script(context.context.document, context.context.generation),
             );
+        }
+        if let Some(script) = pending.theme_choices {
+            evaluate_javascript(web_view, &script);
         }
         if let Some(appearance) = pending.appearance {
             match appearance_script(&appearance.appearance) {
@@ -824,6 +860,18 @@ impl EmbeddedWebView {
             evaluate_javascript(self.view, &script);
         }
         Ok(())
+    }
+
+    pub fn set_theme_choices(&mut self, names: &[String], selected: Option<&str>) {
+        assert!(main_thread(), "WKWebView must be used on main thread");
+        let names = serde_json::to_string(names).expect("theme names serialize");
+        let selected = serde_json::to_string(&selected).expect("theme selection serializes");
+        let script = format!("window.mdvrSetThemeChoices({names}, {selected});");
+        if self.pending_state.page_ready() {
+            evaluate_javascript(self.view, &script);
+        } else {
+            self.pending_state.theme_choices = Some(script);
+        }
     }
 
     pub fn set_history_availability(&self, back: bool, forward: bool) {

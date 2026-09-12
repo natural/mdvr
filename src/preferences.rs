@@ -161,6 +161,8 @@ pub struct Preferences {
     pub reading_locator: Option<ReadingLocator>,
     #[serde(default)]
     pub theme: Option<String>,
+    #[serde(default)]
+    pub theme_file: Option<PathBuf>,
     #[serde(default = "default_text_scale")]
     pub text_scale_percent: u16,
     #[serde(default)]
@@ -179,6 +181,7 @@ impl Default for Preferences {
             last_document: None,
             reading_locator: None,
             theme: None,
+            theme_file: None,
             text_scale_percent: DEFAULT_TEXT_SCALE_PERCENT,
             window: WindowGeometry::default(),
         }
@@ -196,6 +199,7 @@ impl Preferences {
             locator.validate()?;
         }
         validate_optional_text(self.theme.as_deref(), "theme")?;
+        validate_optional_path(self.theme_file.as_deref())?;
         if !(MIN_TEXT_SCALE_PERCENT..=MAX_TEXT_SCALE_PERCENT).contains(&self.text_scale_percent) {
             return Err(PreferencesError::InvalidTextScale(self.text_scale_percent));
         }

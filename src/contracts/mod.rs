@@ -522,6 +522,8 @@ pub enum ThemeAction {
     System,
     Light,
     Dark,
+    Import,
+    Named { name: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1155,6 +1157,7 @@ impl Validate for ActionMessage {
             Self::Outline(OutlineAction::Navigate { heading }) => {
                 text(heading, "heading", MAX_TEXT_BYTES)
             }
+            Self::Theme(ThemeAction::Named { name }) => text(name, "theme", MAX_TEXT_BYTES),
             Self::CapturePosition(v) => v.validate(),
             Self::RestorePosition(v) => v.validate(),
             _ => Ok(()),

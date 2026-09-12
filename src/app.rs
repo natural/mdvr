@@ -25,7 +25,7 @@ use crate::{
     platform::{
         EmbeddedWebView,
         bridge::{BridgeContext, BridgeMessage},
-        drain_bridge_messages, file_url_path, open_external_url,
+        choose_json_file, drain_bridge_messages, file_url_path, open_external_url,
         remote_policy::{RemoteLimits, RemotePolicy},
         resource_policy::{ResourceAuthorization, ResourcePolicy},
         update_bridge_context,
@@ -34,7 +34,7 @@ use crate::{
         DisplayBounds, LaunchIntent, Preferences, WindowGeometry, conventional_path,
         load_or_default, resolve_launch, save,
     },
-    theme::{AppearanceMode, default_theme},
+    theme::{AppearanceMode, ThemeFamily, default_theme, import_file},
     ui::{FocusOwner, ShellCommand, ShellState},
 };
 
@@ -201,6 +201,7 @@ struct MdvrView {
     pending_open: VecDeque<PathBuf>,
     pending_large: Option<(PathBuf, usize)>,
     startup_error: Option<String>,
+    theme_family: Option<ThemeFamily>,
 }
 
 impl MdvrView {
@@ -233,6 +234,7 @@ impl MdvrView {
             pending_open: VecDeque::new(),
             pending_large: None,
             startup_error: None,
+            theme_family: None,
         };
         let context = view
             .navigation
@@ -250,6 +252,11 @@ impl MdvrView {
             .map(|path| load_or_default(&path).preferences)
             .unwrap_or_default();
         self.shell.text_scale_percent = self.preferences.text_scale_percent;
+        self.theme_family = self
+            .preferences
+            .theme_file
+            .as_deref()
+            .and_then(|path| import_file(path).ok());
         if launch.state.document.is_none() {
             self.start_discovery(cx);
             window.focus(&self.picker_focus);
@@ -446,23 +453,71 @@ impl MdvrView {
         }
     }
 
-    fn update_appearance(&mut self, window: &Window) {
-        let mode = match self.preferences.theme.as_deref() {
-            Some("light") => AppearanceMode::Light,
-            Some("dark") => AppearanceMode::Dark,
-            _ => match window.appearance() {
-                WindowAppearance::Dark | WindowAppearance::VibrantDark => AppearanceMode::Dark,
-                WindowAppearance::Light | WindowAppearance::VibrantLight => AppearanceMode::Light,
-            },
+    fn import_theme(&mut self) {
+        let Some(path) = choose_json_file() else {
+            return;
         };
+        match import_file(&path) {
+            Ok(family) => {
+                let Some(theme) = family.members.first() else {
+                    return;
+                };
+                self.preferences.theme = Some(theme.name.clone());
+                self.preferences.theme_file = Some(path);
+                self.theme_family = Some(family);
+                self.appearance_mode = None;
+                self.save_preferences();
+            }
+            Err(error) => {
+                self.startup_error = Some(format!("Theme import failed: {error}"));
+                eprintln!("mdvr: theme import failed: {error}");
+            }
+        }
+    }
+
+    fn update_appearance(&mut self, window: &Window) {
+        let selected_theme = self.preferences.theme.as_deref().and_then(|name| {
+            self.theme_family
+                .as_ref()
+                .and_then(|family| family.member(name))
+        });
+        let mode = selected_theme.map_or_else(
+            || match self.preferences.theme.as_deref() {
+                Some("light") => AppearanceMode::Light,
+                Some("dark") => AppearanceMode::Dark,
+                _ => match window.appearance() {
+                    WindowAppearance::Dark | WindowAppearance::VibrantDark => AppearanceMode::Dark,
+                    WindowAppearance::Light | WindowAppearance::VibrantLight => {
+                        AppearanceMode::Light
+                    }
+                },
+            },
+            |theme| theme.tokens.mode,
+        );
+        if let Some(web_view) = self.web_view.as_mut() {
+            let names = self
+                .theme_family
+                .as_ref()
+                .map(|family| {
+                    family
+                        .members
+                        .iter()
+                        .map(|theme| theme.name.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            web_view.set_theme_choices(&names, self.preferences.theme.as_deref());
+        }
         if self.appearance_mode == Some(mode) {
             return;
         }
         let Some(generation) = self.bridge_context.generation else {
             return;
         };
-        let result = default_theme(mode)
-            .tokens
+        let tokens = selected_theme
+            .map(|theme| theme.tokens.clone())
+            .unwrap_or_else(|| default_theme(mode).tokens);
+        let result = tokens
             .with_scale(self.preferences.text_scale_percent)
             .and_then(|tokens| tokens.as_revision_one())
             .map(|mut appearance| {
@@ -550,13 +605,32 @@ impl MdvrView {
                             cx.notify();
                         }
                         if let ActionMessage::Theme(theme) = &action.action {
-                            self.preferences.theme = match theme {
-                                crate::contracts::ThemeAction::System => None,
-                                crate::contracts::ThemeAction::Light => Some("light".into()),
-                                crate::contracts::ThemeAction::Dark => Some("dark".into()),
-                            };
-                            self.appearance_mode = None;
-                            self.save_preferences();
+                            match theme {
+                                crate::contracts::ThemeAction::System => {
+                                    self.preferences.theme = None
+                                }
+                                crate::contracts::ThemeAction::Light => {
+                                    self.preferences.theme = Some("light".into())
+                                }
+                                crate::contracts::ThemeAction::Dark => {
+                                    self.preferences.theme = Some("dark".into())
+                                }
+                                crate::contracts::ThemeAction::Import => self.import_theme(),
+                                crate::contracts::ThemeAction::Named { name }
+                                    if self
+                                        .theme_family
+                                        .as_ref()
+                                        .and_then(|family| family.member(name))
+                                        .is_some() =>
+                                {
+                                    self.preferences.theme = Some(name.clone());
+                                }
+                                crate::contracts::ThemeAction::Named { .. } => {}
+                            }
+                            if !matches!(theme, crate::contracts::ThemeAction::Import) {
+                                self.appearance_mode = None;
+                                self.save_preferences();
+                            }
                             cx.notify();
                         }
                         match action.action {

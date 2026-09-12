@@ -139,7 +139,10 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 - Reader theme chooser offers closed System/Light/Dark choices only. Native state
   persists override, reapplies validated tokens, and leaves System following live
   window appearance. Isolated live choice switched to Light and saved `"light"`.
-  Evidence: [light theme](screenshots/theme-light.png).
+  Evidence: [light theme](screenshots/theme-light.png). Import option opens native
+  JSON picker; validated Zed families add safe named choices while arbitrary CSS/
+  script values stay blocked. Imported `Safe dark` path/name persisted and restored
+  after restart. Evidence: [imported theme](screenshots/imported-theme.png).
 - Latest checkpoint verified debug build, 78 Rust tests/clippy and 25 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
@@ -161,7 +164,7 @@ The following remain unverified against a live embedded WKWebView: resize and
 clipping, automated picker text filtering and broader focus transitions,
 cross-block selection and rendered/source clipboard behavior, reload selection/locator
 preservation, non-search action bridge execution, CSP enforcement, Mermaid async output,
-remote resource consent, dynamic system-appearance changes, and imported themes.
+remote resource consent and automated dynamic system-appearance switching.
 
 Unit and Bun tests cover the corresponding pure/core behavior but do not close
 these app-evidence rows.
