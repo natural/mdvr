@@ -136,6 +136,12 @@ enum CliCommand {
 const HELP: &str = "Usage: mdvr [PATH]\n\nOpen one local file or browse one local directory.\nWith no path, browse caller's current directory.\n\nOptions:\n  --help       Show this help\n  --version    Show version\n";
 
 #[cfg(target_os = "macos")]
+fn is_packaged(executable: &Path) -> bool {
+    executable
+        .ancestors()
+        .any(|path| path.extension().is_some_and(|extension| extension == "app"))
+}
+
 fn main() {
     let caller_cwd = match env::current_dir() {
         Ok(path) => path,
@@ -147,7 +153,16 @@ fn main() {
     match parse_args(env::args_os(), &caller_cwd) {
         Ok(CliCommand::Help) => print!("{HELP}"),
         Ok(CliCommand::Version) => println!("mdvr {}", env!("CARGO_PKG_VERSION")),
-        Ok(CliCommand::Launch(plan)) => app::run(plan),
+        Ok(CliCommand::Launch(plan)) => {
+            let plan = if plan.intent == LaunchIntent::Bare
+                && env::current_exe().is_ok_and(|path| is_packaged(&path))
+            {
+                app::dock_launch(&plan)
+            } else {
+                plan
+            };
+            app::run(plan);
+        }
         Err(error) => {
             eprintln!("mdvr: {error}");
             std::process::exit(2);
@@ -212,6 +227,14 @@ mod tests {
         };
         assert_eq!(directory.intent, LaunchIntent::ExplicitDirectory);
         assert_eq!(directory.picker_root, cwd.join("."));
+    }
+
+    #[test]
+    fn packaged_detection_requires_an_app_bundle_ancestor() {
+        assert!(is_packaged(Path::new(
+            "/Applications/mdvr.app/Contents/MacOS/mdvr"
+        )));
+        assert!(!is_packaged(Path::new("/usr/local/bin/mdvr")));
     }
 
     #[test]

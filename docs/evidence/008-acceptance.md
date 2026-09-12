@@ -156,6 +156,12 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   only after app consumes the request and acknowledges successful load. Live bundled
   CLI returned `mdvr: accepted /private/tmp/mdvr-local-link/doc.md` only after current
   app opened that document; private request/ack cleanup and timeout are fail-closed.
+  Cold-start delivery now retries the one-shot request until app callback consumes it;
+  cold file and no-argument directory requests both acknowledged. No-argument bundled
+  CLI preserved invoking cwd (`/private/tmp/mdvr-filter-fixture`), while a cold packaged
+  no-argument executable launch used isolated saved Dock document and 800×600 geometry.
+  URL decoding is thread-independent, and open requests execute directly on associated
+  GPUI window context rather than waiting for an incidental render.
 - Hostile live fixture strips scripts, event handlers, CSS, frames, forms and
   orphan form inputs. Local SVG bytes now pass renderer SVG sanitizer before Blob
   creation, removing scripts, handlers and every href/xlink external reference.
@@ -199,7 +205,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   [rendered copy and select all](screenshots/rendered-copy-select-all.png).
 - Renderer posts closed `render.ready` only after synchronous DOM mount; native
   bridge rejects stale document/generation and records commit-to-ready latency.
-- Latest local verification passed 84 Rust tests/clippy, 32 web tests/build,
+- Latest local verification passed 86 Rust tests/clippy, 32 web tests/build,
   restricted-file WKWebView probe, current release build, app inspection, and DMG
   inspection.
 

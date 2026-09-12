@@ -317,24 +317,10 @@ pub(crate) fn choose_directory() -> Option<PathBuf> {
 }
 
 pub(crate) fn file_url_path(url: &str) -> Option<PathBuf> {
-    if !main_thread() || url.contains(char::is_control) {
+    if url.contains(char::is_control) {
         return None;
     }
-    unsafe {
-        let value = NSString::alloc(nil).init_str(url);
-        let target: id = msg_send![class!(NSURL), URLWithString: value];
-        let _: () = msg_send![value, release];
-        if target.is_null() {
-            return None;
-        }
-        let is_file: BOOL = msg_send![target, isFileURL];
-        if !is_file {
-            return None;
-        }
-        let path: id = msg_send![target, path];
-        let bytes: *const std::os::raw::c_char = msg_send![path, UTF8String];
-        (!bytes.is_null()).then(|| PathBuf::from(CStr::from_ptr(bytes).to_string_lossy().as_ref()))
-    }
+    reqwest::Url::parse(url).ok()?.to_file_path().ok()
 }
 
 pub(crate) fn open_external_url(url: &str) -> bool {
@@ -1151,6 +1137,16 @@ impl Drop for EmbeddedWebView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_urls_decode_without_main_thread_state() {
+        assert_eq!(
+            file_url_path("file:///tmp/space%20document.md"),
+            Some(PathBuf::from("/tmp/space document.md"))
+        );
+        assert_eq!(file_url_path("https://example.com/file.md"), None);
+        assert_eq!(file_url_path("file:///tmp/bad\nname.md"), None);
+    }
 
     #[test]
     fn local_file_policy_rejects_executables() {

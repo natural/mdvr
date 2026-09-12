@@ -14,13 +14,7 @@ esac
 
 app=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 [ -d "$app" ] || { printf 'mdvr: app bundle missing: %s\n' "$app" >&2; exit 1; }
-if [ "$#" -eq 0 ]; then
-    /usr/bin/open -a "$app"
-    printf 'mdvr: accepted Dock launch\n'
-    exit 0
-fi
-
-input=$1
+input=${1:-$PWD}
 [ -e "$input" ] || { printf 'mdvr: path does not exist: %s\n' "$input" >&2; exit 2; }
 if [ -f "$input" ]; then
     case $input in
@@ -46,9 +40,12 @@ ack=${request%.mdvr-request}.ack
 trap 'rm -f "$request" "$ack"' EXIT HUP INT TERM
 umask 077
 printf %s "$resolved" >"$request"
-/usr/bin/open -a "$app" "$request"
+/usr/bin/open -a "$app"
 attempt=0
 while [ "$attempt" -lt 200 ]; do
+    if [ -f "$request" ] && [ $((attempt % 10)) -eq 0 ]; then
+        /usr/bin/open -a "$app" "$request" || true
+    fi
     attempt=$((attempt + 1))
     if [ -f "$ack" ]; then
         result=$(cat "$ack")

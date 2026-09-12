@@ -86,15 +86,16 @@ fn decode_open_request(path: PathBuf) -> Option<OpenRequest> {
 }
 
 fn enqueue_open_urls(urls: Vec<String>) {
+    let requests = urls
+        .iter()
+        .filter_map(|url| file_url_path(url))
+        .filter_map(decode_open_request)
+        .collect::<Vec<_>>();
     let mut queue = OPEN_PATHS
         .get_or_init(|| Mutex::new(VecDeque::new()))
         .lock()
         .expect("open-path queue poisoned");
-    queue.extend(
-        urls.iter()
-            .filter_map(|url| file_url_path(url))
-            .filter_map(decode_open_request),
-    );
+    queue.extend(requests);
 }
 
 fn drain_open_paths() -> Vec<OpenRequest> {
@@ -267,7 +268,7 @@ struct MdvrView {
     reload_stop: Option<Arc<AtomicBool>>,
     reload_task: Option<Task<()>>,
     discovery_task: Option<Task<()>>,
-    bridge_task: Task<()>,
+    bridge_task: Option<Task<()>>,
     resource_policy: Option<ResourcePolicy>,
     preferences: Preferences,
     appearance_mode: Option<AppearanceMode>,
@@ -290,17 +291,6 @@ impl MdvrView {
     fn new(shell: ShellState, navigation: NavigationState, cx: &mut Context<Self>) -> Self {
         let (remote_sender, remote_results) = channel();
         let picker_focus = cx.focus_handle();
-        let bridge_task = cx.spawn(async move |view, cx| {
-            loop {
-                Timer::after(Duration::from_millis(16)).await;
-                if view
-                    .update(cx, |view, cx| view.drain_bridge_messages(cx))
-                    .is_err()
-                {
-                    return;
-                }
-            }
-        });
         let mut view = Self {
             shell,
             navigation,
@@ -309,7 +299,7 @@ impl MdvrView {
             reload_stop: None,
             reload_task: None,
             discovery_task: None,
-            bridge_task,
+            bridge_task: None,
             resource_policy: None,
             preferences: Preferences::default(),
             appearance_mode: None,
@@ -339,6 +329,30 @@ impl MdvrView {
     }
 
     fn initialize(&mut self, window: &mut Window, launch: &LaunchPlan, cx: &mut Context<Self>) {
+        self.bridge_task = Some(cx.spawn_in(window, async move |view, cx| {
+            loop {
+                Timer::after(Duration::from_millis(16)).await;
+                if view
+                    .update(cx, |view, cx| view.drain_bridge_messages(cx))
+                    .is_err()
+                {
+                    return;
+                }
+                let opens = drain_open_paths();
+                if !opens.is_empty()
+                    && cx
+                        .update(|window, app| {
+                            view.update(app, |view, cx| {
+                                view.pending_open.extend(opens);
+                                view.process_next_open(window, cx);
+                            })
+                        })
+                        .is_err()
+                {
+                    return;
+                }
+            }
+        }));
         self.preferences = conventional_path()
             .map(|path| load_or_default(&path).preferences)
             .unwrap_or_default();
@@ -779,10 +793,6 @@ impl MdvrView {
                 self.deliver_resource_result(result);
             }
         }
-        self.pending_open.extend(drain_open_paths());
-        if !self.pending_open.is_empty() {
-            cx.notify();
-        }
         for message in drain_bridge_messages() {
             match message {
                 BridgeMessage::Action(action) => {
@@ -892,6 +902,16 @@ impl MdvrView {
                     self.report_error(format!("Renderer error: {}", error.message));
                 }
             }
+        }
+    }
+
+    fn process_next_open(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let Some(request) = self.pending_open.pop_front() else {
+            return;
+        };
+        let accepted = self.open_received_document(request.path, window, cx);
+        if let Some(ack) = request.ack {
+            let _ = fs::write(ack, if accepted { "accepted" } else { "failed" });
         }
     }
 
@@ -1360,15 +1380,7 @@ impl Drop for MdvrView {
 
 impl Render for MdvrView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if let Some(request) = self.pending_open.pop_front() {
-            let accepted = self.open_received_document(request.path, window, cx);
-            if let Some(ack) = request.ack {
-                let _ = fs::write(ack, if accepted { "accepted" } else { "failed" });
-            }
-            if !self.pending_open.is_empty() {
-                cx.notify();
-            }
-        }
+        self.process_next_open(window, cx);
         self.update_appearance(window);
         self.capture_window_geometry(window);
         if let Some(web_view) = self.web_view.as_ref() {
@@ -1544,7 +1556,7 @@ impl Render for MdvrView {
     }
 }
 
-fn dock_launch(fallback: &LaunchPlan) -> LaunchPlan {
+pub(crate) fn dock_launch(fallback: &LaunchPlan) -> LaunchPlan {
     let preferences = conventional_path()
         .map(|path| load_or_default(&path).preferences)
         .unwrap_or_default();

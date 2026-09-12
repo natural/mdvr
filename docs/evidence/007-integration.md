@@ -7,7 +7,9 @@ Status: **integrated feature candidate; release blockers remain in 008**.
 - `src/app.rs` opens one GPUI window and owns `ShellState` plus
   `Option<EmbeddedWebView>` in one root view. Bundled CLI explicit opens use private,
   bounded, one-shot request files and wait for app load acknowledgment instead of
-  equating LaunchServices process dispatch with success.
+  equating LaunchServices process dispatch with success. Cold app startup retries
+  delivery until callback readiness; bundled no-argument CLI passes caller cwd as a
+  directory request, while cold packaged Dock launch restores saved state.
 - `EmbeddedWebView` is attached while GPUI builds that window, not during
   repeated renders. The field retains WebKit view and navigation delegate until
   root-view drop; `Drop` clears the delegate and removes/releases native
@@ -97,7 +99,7 @@ work as unintegrated slices.
 ```text
 cargo fmt --check                         passed
 cargo check --locked                      passed; 1 upstream future-incompat warning
-cargo test --locked                       passed; 84 tests
+cargo test --locked                       passed; 86 tests
 cargo clippy --locked --all-targets -- -D warnings
                                            passed; 1 upstream future-incompat warning
 cd web && bun install --frozen-lockfile    passed; 135 packages
