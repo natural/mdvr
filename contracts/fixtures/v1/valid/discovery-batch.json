@@ -1,0 +1,14 @@
+{
+  "revision": 1,
+  "message": {
+    "kind": "discovery.batch",
+    "payload": {
+      "root": 4,
+      "scan": 9,
+      "entries": [
+        { "relative_path": "README.md" },
+        { "relative_path": "docs/guide.markdown" }
+      ]
+    }
+  }
+}

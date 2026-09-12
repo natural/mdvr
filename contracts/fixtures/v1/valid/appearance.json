@@ -1,0 +1,18 @@
+{
+  "revision": 1,
+  "message": {
+    "kind": "appearance.update",
+    "payload": {
+      "document": null,
+      "appearance": {
+        "mode": "system",
+        "scale_percent": 100,
+        "reader_background": "#ffffff",
+        "reader_foreground": "#000000",
+        "code_background": "#eeeeee",
+        "accent": "#3366ff",
+        "syntax": []
+      }
+    }
+  }
+}

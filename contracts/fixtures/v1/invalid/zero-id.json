@@ -1,0 +1,11 @@
+{
+  "revision": 1,
+  "message": {
+    "kind": "render.ready",
+    "payload": {
+      "document": 0,
+      "generation": 1,
+      "headings": []
+    }
+  }
+}

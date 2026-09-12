@@ -1,0 +1,19 @@
+{
+  "revision": 1,
+  "message": {
+    "kind": "document.load",
+    "payload": {
+      "document": 12,
+      "generation": 3,
+      "path": "/Users/example/project/README.md",
+      "source": "# Hello\n\nMarkdown source.",
+      "anchor": "hello",
+      "locator": {
+        "heading": "hello",
+        "block": "paragraph-1",
+        "offset": 0,
+        "fallback": "nearest_heading"
+      }
+    }
+  }
+}

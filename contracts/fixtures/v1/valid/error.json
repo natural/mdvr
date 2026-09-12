@@ -1,0 +1,15 @@
+{
+  "revision": 1,
+  "message": {
+    "kind": "error",
+    "payload": {
+      "scope": "render",
+      "code": "parse",
+      "message": "Renderer rejected malformed input.",
+      "retry": "reload",
+      "document": 12,
+      "generation": 3,
+      "scan": null
+    }
+  }
+}

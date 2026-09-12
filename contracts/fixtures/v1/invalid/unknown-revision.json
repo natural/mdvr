@@ -1,0 +1,13 @@
+{
+  "revision": 99,
+  "message": {
+    "kind": "launch.request",
+    "payload": {
+      "invocation": 1,
+      "intent": "picker",
+      "caller_cwd": "/Users/example/project",
+      "path": null,
+      "ack_timeout_ms": 500
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "revision": 1,
+  "message": {
+    "kind": "resource.read-arbitrary-file",
+    "payload": {}
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "revision": 1,
+  "message": {
+    "kind": "resource.result",
+    "payload": {
+      "request": 22,
+      "resource": 33,
+      "document": 12,
+      "generation": 3,
+      "result": {
+        "denied": { "code": "denied" }
+      }
+    }
+  }
+}

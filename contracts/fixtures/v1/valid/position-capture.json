@@ -1,0 +1,17 @@
+{
+  "revision": 1,
+  "message": {
+    "kind": "position.captured",
+    "payload": {
+      "request": 20,
+      "document": 12,
+      "generation": 3,
+      "locator": {
+        "heading": "hello",
+        "block": "paragraph-1",
+        "offset": 18,
+        "fallback": "nearest_heading"
+      }
+    }
+  }
+}

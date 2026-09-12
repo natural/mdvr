@@ -1,0 +1,1 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" onload="alert(1)" width="1" height="1"><script>alert(1)</script><image href="https://remote.invalid/x" xlink:href="file:///etc/passwd" width="1" height="1"/></svg>

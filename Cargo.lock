@@ -2588,7 +2588,13 @@ dependencies = [
 name = "mdvr"
 version = "0.1.0"
 dependencies = [
+ "block",
+ "cocoa",
  "gpui",
+ "objc",
+ "raw-window-handle",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

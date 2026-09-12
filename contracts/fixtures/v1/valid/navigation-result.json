@@ -1,0 +1,14 @@
+{
+  "revision": 1,
+  "message": {
+    "kind": "navigation.result",
+    "payload": {
+      "request": 21,
+      "document": 12,
+      "generation": 3,
+      "decision": "accepted",
+      "authority": "native_policy",
+      "error": null
+    }
+  }
+}

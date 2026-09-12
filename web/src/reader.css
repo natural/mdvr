@@ -1,0 +1,93 @@
+:root {
+  color-scheme: light dark;
+  --reader-text: CanvasText;
+  --reader-muted: GrayText;
+  --reader-code: color-mix(in srgb, CanvasText 7%, Canvas);
+  --reader-focus: Highlight;
+  font:
+    16px / 1.6 system-ui,
+    sans-serif;
+}
+
+.reader {
+  color: var(--reader-text);
+  max-width: 80ch;
+  margin: 0 auto;
+  padding: 2rem clamp(1rem, 4vw, 4rem);
+}
+
+.reader :where(p, li, blockquote, details, summary) {
+  max-width: 80ch;
+}
+
+.reader :where(pre, table) {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.reader pre,
+.reader code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.reader pre {
+  overflow-x: auto;
+  padding: 1rem;
+  background: var(--reader-code);
+  tab-size: 2;
+  white-space: pre;
+}
+
+.reader table {
+  border-collapse: collapse;
+  display: block;
+  width: max-content;
+  min-width: 100%;
+}
+
+.reader th,
+.reader td {
+  border: 1px solid color-mix(in srgb, CanvasText 22%, Canvas);
+  padding: 0.4rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.reader .image-placeholder,
+.reader .render-error,
+.reader .diagram-pending,
+.reader .math-pending {
+  display: block;
+  border-left: 0.3rem solid var(--reader-muted);
+  color: var(--reader-muted);
+  padding: 0.5rem 0.8rem;
+}
+
+.reader :where(a, button, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--reader-focus);
+  outline-offset: 3px;
+}
+
+.reader .outline {
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+}
+
+@media (max-width: 54rem) {
+  .reader {
+    padding: 1rem;
+  }
+
+  .reader .outline {
+    position: static;
+    max-height: none;
+  }
+}
+
+@media (max-width: 38rem) {
+  .reader .outline {
+    display: none;
+  }
+}

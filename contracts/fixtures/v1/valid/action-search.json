@@ -1,0 +1,17 @@
+{
+  "revision": 1,
+  "message": {
+    "kind": "action",
+    "payload": {
+      "request": 24,
+      "document": 12,
+      "generation": 3,
+      "action": {
+        "kind": "search",
+        "payload": {
+          "open": { "query": "render", "case_sensitive": false }
+        }
+      }
+    }
+  }
+}
