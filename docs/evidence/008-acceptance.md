@@ -86,6 +86,12 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   selection text before DOM replacement, restores matching block offset, and
   recreates unchanged selection across text nodes without moving focus. Source
   regression check exists; live scrolled/selection evidence remains open.
+- Directory launch now starts ignore-aware discovery off GPUI thread, applies
+  bounded progressive batches to native picker state, and opens selected files
+  into same window. Missing GPUI `font-kit` feature caused invisible text; enabling
+  it fixed native text while keeping platform defaults disabled. Live directory
+  picker listed four Markdown files and opened `first.md`. Evidence:
+  [picker](screenshots/picker.png), [opened document](screenshots/picker-open.png).
 - Latest checkpoint verified debug build, 75 Rust tests/clippy and 20 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
@@ -104,8 +110,8 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 ## Unverified desktop behavior
 
 The following remain unverified against a live embedded WKWebView: resize and
-clipping, keyboard/focus transitions, close/reopen and activation, picker
-interaction, cross-block selection and rendered/source clipboard behavior, reload selection/locator
+clipping, keyboard picker/filter and focus transitions, close/reopen and activation,
+cross-block selection and rendered/source clipboard behavior, reload selection/locator
 preservation, non-search action bridge execution, CSP enforcement, Mermaid async output,
 remote resource consent, dynamic system-appearance changes, imported themes, and
 window geometry restoration.

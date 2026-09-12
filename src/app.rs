@@ -13,9 +13,12 @@ use crate::{
     contracts::{
         ActionMessage, ActionMessageEnvelope, ErrorCode, Generation, NavigationRequest,
         NavigationTarget, ResourceReference, ResourceRequest, ResourceResult, ResourceResultValue,
-        SearchAction,
+        RootId, ScanId, SearchAction,
     },
-    files::{LoadedSource, ReloadOutcome, load_source, spawn_reload_worker},
+    files::{
+        DiscoveryEvent, DiscoveryScanner, LoadedSource, ReloadOutcome, load_source,
+        spawn_reload_worker,
+    },
     navigation::{LoadRequest, Locator, NavigationAction, NavigationState},
     platform::{
         EmbeddedWebView,
@@ -150,6 +153,7 @@ struct MdvrView {
     bridge_context: BridgeContext,
     reload_stop: Option<Arc<AtomicBool>>,
     reload_task: Option<Task<()>>,
+    discovery_task: Option<Task<()>>,
     bridge_task: Task<()>,
     resource_policy: Option<ResourcePolicy>,
     preferences: Preferences,
@@ -176,6 +180,7 @@ impl MdvrView {
             bridge_context: BridgeContext::default(),
             reload_stop: None,
             reload_task: None,
+            discovery_task: None,
             bridge_task,
             resource_policy: None,
             preferences: Preferences::default(),
@@ -196,6 +201,10 @@ impl MdvrView {
         self.preferences = conventional_path()
             .map(|path| load_or_default(&path).preferences)
             .unwrap_or_default();
+        if launch.state.document.is_none() {
+            self.start_discovery(cx);
+            return;
+        }
         let Some(mut web_view) = EmbeddedWebView::attach(window) else {
             return;
         };
@@ -227,6 +236,89 @@ impl MdvrView {
         if let Some(web_view) = self.web_view.as_ref() {
             web_view.sync_frame();
         }
+    }
+
+    fn start_discovery(&mut self, cx: &mut Context<Self>) {
+        let root = self
+            .shell
+            .root
+            .clone()
+            .expect("picker always has a browsing root");
+        let root_id = RootId::new(1).expect("nonzero root");
+        let scan_id = ScanId::new(1).expect("nonzero scan");
+        let discovery = DiscoveryScanner::new().spawn(root, root_id, scan_id);
+        self.discovery_task = Some(cx.spawn(async move |view, cx| {
+            loop {
+                Timer::after(Duration::from_millis(25)).await;
+                match discovery.try_next() {
+                    Ok(Some(event)) => {
+                        let complete = matches!(event, DiscoveryEvent::Complete(_));
+                        if view
+                            .update(cx, |view, cx| {
+                                match event {
+                                    DiscoveryEvent::Batch(batch) => {
+                                        let _ =
+                                            view.shell.picker.apply_batch(&batch, root_id, scan_id);
+                                    }
+                                    DiscoveryEvent::Complete(done) => {
+                                        let _ = view.shell.picker.complete(&done, root_id, scan_id);
+                                    }
+                                    DiscoveryEvent::Error(error) => {
+                                        let _ = view.shell.picker.fail(&error, root_id, scan_id);
+                                    }
+                                }
+                                cx.notify();
+                            })
+                            .is_err()
+                        {
+                            return;
+                        }
+                        if complete {
+                            return;
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!("mdvr: discovery failed: {error}");
+                        return;
+                    }
+                }
+            }
+        }));
+    }
+
+    fn open_picker_document(&mut self, relative: String, window: &Window, cx: &mut Context<Self>) {
+        let Some(root) = self.shell.root.as_deref() else {
+            return;
+        };
+        let path = root.join(relative);
+        let Ok(source) = load_source(&path, false) else {
+            eprintln!("mdvr: cannot open {}", path.display());
+            return;
+        };
+        let Some(mut web_view) = EmbeddedWebView::attach(window) else {
+            eprintln!("mdvr: WKWebView attachment failed");
+            return;
+        };
+        let _ = web_view.load_initial_document();
+        let generation = Generation::new(1).expect("nonzero generation");
+        if let Err(error) = web_view.load_document_source(&source.source, generation) {
+            eprintln!("mdvr: cannot prepare {}: {error}", path.display());
+            return;
+        }
+        self.navigation.open_initial(source.clone());
+        self.shell.current_document = Some(path.clone());
+        self.web_view = Some(web_view);
+        self.watch_document(path, Some(source), cx);
+        let current = self.navigation.current().expect("document was opened");
+        self.document_committed(BridgeContext {
+            document: Some(current.document),
+            generation: Some(current.generation),
+        });
+        self.appearance_mode = None;
+        self.update_appearance(window);
+        self.save_preferences();
+        cx.notify();
     }
 
     fn document_committed(&mut self, context: BridgeContext) {
@@ -513,21 +605,58 @@ impl Drop for MdvrView {
             stop.store(true, std::sync::atomic::Ordering::Release);
         }
         let _ = self.reload_task.take();
+        let _ = self.discovery_task.take();
         let _ = &self.bridge_task;
     }
 }
 
 impl Render for MdvrView {
-    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.update_appearance(window);
         if let Some(web_view) = self.web_view.as_ref() {
             web_view.sync_frame();
+            return div().size_full();
         }
-        if self.web_view.is_some() {
-            div().size_full()
-        } else {
-            div().size_full().child("WKWebView attachment failed")
-        }
+        let entries = self.shell.picker.visible();
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .p_4()
+            .gap_2()
+            .bg(gpui::rgb(0x202124))
+            .text_color(gpui::rgb(0xf1f3f4))
+            .child(
+                div()
+                    .text_color(gpui::rgb(0xffffff))
+                    .text_xl()
+                    .child("Choose a Markdown file"),
+            )
+            .child(
+                div()
+                    .id("picker-list")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .children(entries.into_iter().enumerate().map(|(index, entry)| {
+                        let path = entry.relative_path;
+                        div()
+                            .id(("picker-entry", index))
+                            .px_3()
+                            .py_2()
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .hover(|style| style.bg(gpui::rgb(0x303134)))
+                            .text_color(gpui::rgb(0xffffff))
+                            .child(path.clone())
+                            .on_click(cx.listener(move |view, _, window, cx| {
+                                view.open_picker_document(path.clone(), window, cx);
+                            }))
+                    })),
+            )
+            .when(
+                self.shell.picker.status().is_some() && self.shell.picker.visible().is_empty(),
+                |view| view.child("No Markdown files found"),
+            )
     }
 }
 
