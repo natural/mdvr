@@ -291,44 +291,65 @@ impl MdvrView {
             .clone()
             .expect("picker always has a browsing root");
         let root_id = RootId::new(1).expect("nonzero root");
-        let scan_id = ScanId::new(1).expect("nonzero scan");
-        let discovery = DiscoveryScanner::new().spawn(root, root_id, scan_id);
         self.discovery_task = Some(cx.spawn(async move |view, cx| {
+            let mut scan = 1_u64;
             loop {
-                Timer::after(Duration::from_millis(25)).await;
-                match discovery.try_next() {
-                    Ok(Some(event)) => {
-                        let complete = matches!(event, DiscoveryEvent::Complete(_));
-                        if view
-                            .update(cx, |view, cx| {
-                                match event {
-                                    DiscoveryEvent::Batch(batch) => {
+                let scan_id = ScanId::new(scan).expect("nonzero scan");
+                let discovery = DiscoveryScanner::new().spawn(root.clone(), root_id, scan_id);
+                let mut collected = Vec::new();
+                loop {
+                    Timer::after(Duration::from_millis(25)).await;
+                    match discovery.try_next() {
+                        Ok(Some(DiscoveryEvent::Batch(batch))) => {
+                            collected.extend(
+                                batch
+                                    .entries
+                                    .iter()
+                                    .map(|entry| entry.relative_path.clone()),
+                            );
+                            if scan == 1
+                                && view
+                                    .update(cx, |view, cx| {
                                         let _ =
                                             view.shell.picker.apply_batch(&batch, root_id, scan_id);
+                                        cx.notify();
+                                    })
+                                    .is_err()
+                            {
+                                return;
+                            }
+                        }
+                        Ok(Some(DiscoveryEvent::Complete(done))) => {
+                            if view
+                                .update(cx, |view, cx| {
+                                    if scan > 1 {
+                                        view.shell.picker.replace_entries(collected.clone());
                                     }
-                                    DiscoveryEvent::Complete(done) => {
-                                        let _ = view.shell.picker.complete(&done, root_id, scan_id);
-                                    }
-                                    DiscoveryEvent::Error(error) => {
-                                        let _ = view.shell.picker.fail(&error, root_id, scan_id);
-                                    }
-                                }
+                                    let _ = view.shell.picker.complete(&done, root_id, scan_id);
+                                    cx.notify();
+                                })
+                                .is_err()
+                            {
+                                return;
+                            }
+                            break;
+                        }
+                        Ok(Some(DiscoveryEvent::Error(error))) => {
+                            let _ = view.update(cx, |view, cx| {
+                                let _ = view.shell.picker.fail(&error, root_id, scan_id);
                                 cx.notify();
-                            })
-                            .is_err()
-                        {
+                            });
                             return;
                         }
-                        if complete {
+                        Ok(None) => {}
+                        Err(error) => {
+                            eprintln!("mdvr: discovery failed: {error}");
                             return;
                         }
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        eprintln!("mdvr: discovery failed: {error}");
-                        return;
                     }
                 }
+                Timer::after(Duration::from_secs(1)).await;
+                scan = scan.checked_add(1).unwrap_or(1);
             }
         }));
     }

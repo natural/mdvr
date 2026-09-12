@@ -95,6 +95,10 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   [picker](screenshots/picker.png), [opened document](screenshots/picker-open.png).
   Native focus plus Down/Up and Return keyboard handling also passed: Down then
   Return opened `image.md`. Evidence: [keyboard open](screenshots/picker-keyboard-open.png).
+  While picker remains open, one-second background rescans atomically replace its
+  entries while retaining selected path when present. Live removal of `a.md` and
+  addition of `c.md` produced `b.md`/`c.md` without blocking. Evidence:
+  [picker watch](screenshots/picker-watch.png).
 - WKWebView becomes first responder after direct or picker launch; live direct
   launch accepted ⌘F without a prerequisite document click. HTTP(S) targets now
   pass bounded credential/private-address policy before native `NSWorkspace`
