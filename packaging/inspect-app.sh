@@ -38,6 +38,9 @@ bundle_executable=$(plutil -extract CFBundleExecutable raw -o - "$plist")
 [ "$bundle_executable" = mdvr ] || fail "CFBundleExecutable is not mdvr: $bundle_executable"
 bundle_type=$(plutil -extract CFBundlePackageType raw -o - "$plist")
 [ "$bundle_type" = APPL ] || fail "CFBundlePackageType is not APPL: $bundle_type"
+minimum=$(plutil -extract LSMinimumSystemVersion raw -o - "$plist")
+binary_minimum=$(otool -l "$main" | awk '/LC_BUILD_VERSION/{seen=1} seen && /minos/{print $2; exit}')
+[ "$minimum" = "$binary_minimum" ] || fail "minimum macOS mismatch: plist=$minimum binary=$binary_minimum"
 icon=$(plutil -extract CFBundleIconFile raw -o - "$plist")
 [ "$icon" = AppIcon ] || fail "CFBundleIconFile is not AppIcon: $icon"
 [ -f "$contents/Resources/AppIcon.icns" ] || fail "bundle icon missing"
@@ -54,7 +57,7 @@ grep -Eq 'src="\./[^"/]+\.js"' "$web/index.html" || fail "bundled web entrypoint
 ! grep -Eq 'https?://' "$web/index.html" || fail "bundled web entrypoint references network content"
 
 printf 'packaging inspect: %s\n' "$app"
-printf '  metadata: valid APPL, executable=%s, Markdown association=present, custom URL scheme=absent\n' "$bundle_executable"
+printf '  metadata: valid APPL, executable=%s, minimum macOS=%s, Markdown association=present, custom URL scheme=absent\n' "$bundle_executable" "$minimum"
 
 macho_count=0
 inspect_macho() {

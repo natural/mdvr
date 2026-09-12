@@ -61,8 +61,8 @@ and reruns full app inspection before detaching.
 - Bundle is unsigned and unnotarized. Developer credentials, hardened-runtime
   settings, notarization, stapling, Gatekeeper, clean-machine launch, and Intel
   launch remain release blockers.
-- `LSMinimumSystemVersion` is omitted until pinned dependency and WebKit minimum
-  support is resolved; no deployment target is claimed.
+- `LSMinimumSystemVersion` is 11.0, matching release Mach-O `LC_BUILD_VERSION`;
+  inspection fails on metadata/binary drift.
 - Native code resolves production assets from `Contents/Resources/web` in the
   app bundle, with `web/dist` as dev-checkout fallback. `WKWebView::loadFileURL`
   grants read access only to that canonical asset directory; navigation allows
