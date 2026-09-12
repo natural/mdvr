@@ -31,7 +31,8 @@ use crate::{
         update_bridge_context,
     },
     preferences::{
-        DisplayBounds, Preferences, WindowGeometry, conventional_path, load_or_default, save,
+        DisplayBounds, LaunchIntent, Preferences, WindowGeometry, conventional_path,
+        load_or_default, resolve_launch, save,
     },
     theme::{AppearanceMode, default_theme},
     ui::{FocusOwner, ShellCommand, ShellState},
@@ -853,6 +854,35 @@ impl Render for MdvrView {
     }
 }
 
+fn dock_launch(fallback: &LaunchPlan) -> LaunchPlan {
+    let preferences = conventional_path()
+        .map(|path| load_or_default(&path).preferences)
+        .unwrap_or_default();
+    let available = preferences
+        .last_document
+        .as_deref()
+        .is_some_and(std::path::Path::is_file);
+    let state = resolve_launch(LaunchIntent::Dock, None, &preferences, available)
+        .expect("validated Dock restore");
+    let picker_root = state
+        .browsing_root
+        .clone()
+        .or_else(|| {
+            state
+                .document
+                .as_deref()
+                .and_then(std::path::Path::parent)
+                .map(std::path::Path::to_owned)
+        })
+        .unwrap_or_else(|| fallback.picker_root.clone());
+    LaunchPlan {
+        intent: LaunchIntent::Dock,
+        state,
+        picker_root,
+        explicit: false,
+    }
+}
+
 fn open_mdvr_window(cx: &mut App, launch: LaunchPlan, announce: bool) {
     let geometry = conventional_path()
         .map(|path| load_or_default(&path).preferences.window)
@@ -921,7 +951,7 @@ pub fn run(launch: LaunchPlan) {
     application.on_open_urls(enqueue_open_urls);
     application.on_reopen(move |cx| {
         if cx.windows().is_empty() {
-            open_mdvr_window(cx, reopen_launch.clone(), false);
+            open_mdvr_window(cx, dock_launch(&reopen_launch), false);
         }
     });
     application.run(move |cx: &mut App| open_mdvr_window(cx, launch, true));

@@ -119,7 +119,8 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   and transactionally navigate existing window; multiple events remain FIFO.
   Packaged `open -a mdvr` changed `first.md` to `second.md`, then decoded and
   opened `space doc.md`, with one PID/window throughout. Evidence:
-  [Finder reuse](screenshots/finder-reuse.png).
+  [Finder reuse](screenshots/finder-reuse.png). After closing that window, Dock
+  reopen loaded latest persisted `space doc.md`, not original process launch path.
 - Latest checkpoint verified debug build, 77 Rust tests/clippy and 22 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
