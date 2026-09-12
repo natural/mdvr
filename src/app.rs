@@ -4,7 +4,8 @@ use std::{
 };
 
 use gpui::{
-    App, Application, Context, Render, Task, Timer, Window, WindowOptions, div, prelude::*,
+    App, Application, Context, Render, Task, Timer, Window, WindowAppearance, WindowOptions, div,
+    prelude::*,
 };
 
 use crate::{
@@ -23,6 +24,8 @@ use crate::{
         resource_policy::{ResourceAuthorization, ResourcePolicy},
         update_bridge_context,
     },
+    preferences::{Preferences, conventional_path, load_or_default, save},
+    theme::{AppearanceMode, default_theme},
     ui::{FocusOwner, ShellCommand, ShellState},
 };
 
@@ -146,6 +149,7 @@ struct MdvrView {
     reload_task: Option<Task<()>>,
     bridge_task: Task<()>,
     resource_policy: Option<ResourcePolicy>,
+    preferences: Preferences,
 }
 
 impl MdvrView {
@@ -170,6 +174,7 @@ impl MdvrView {
             reload_task: None,
             bridge_task,
             resource_policy: None,
+            preferences: Preferences::default(),
         };
         let context = view
             .navigation
@@ -183,6 +188,9 @@ impl MdvrView {
     }
 
     fn initialize(&mut self, window: &Window, launch: &LaunchPlan, cx: &mut Context<Self>) {
+        self.preferences = conventional_path()
+            .map(|path| load_or_default(&path).preferences)
+            .unwrap_or_default();
         let Some(mut web_view) = EmbeddedWebView::attach(window) else {
             return;
         };
@@ -209,6 +217,27 @@ impl MdvrView {
                 generation: Some(document.generation),
             });
         self.document_committed(context);
+        self.save_preferences();
+        let mode = match window.appearance() {
+            WindowAppearance::Dark | WindowAppearance::VibrantDark => AppearanceMode::Dark,
+            WindowAppearance::Light | WindowAppearance::VibrantLight => AppearanceMode::Light,
+        };
+        if let Some(web_view) = self.web_view.as_mut()
+            && let Some(generation) = context.generation
+        {
+            match default_theme(mode)
+                .tokens
+                .with_scale(self.preferences.text_scale_percent)
+                .and_then(|tokens| tokens.as_revision_one())
+            {
+                Ok(appearance) => {
+                    if let Err(error) = web_view.apply_appearance(&appearance, generation) {
+                        eprintln!("mdvr: cannot apply appearance: {error}");
+                    }
+                }
+                Err(error) => eprintln!("mdvr: invalid saved appearance: {error}"),
+            }
+        }
         if let Some(web_view) = self.web_view.as_ref() {
             web_view.sync_frame();
         }
@@ -394,6 +423,19 @@ impl MdvrView {
             document: Some(document),
             generation: Some(current.generation),
         });
+        self.save_preferences();
+    }
+
+    fn save_preferences(&mut self) {
+        self.preferences.browsing_root.clone_from(&self.shell.root);
+        self.preferences
+            .last_document
+            .clone_from(&self.shell.current_document);
+        if let Some(path) = conventional_path()
+            && let Err(error) = save(&path, &self.preferences)
+        {
+            eprintln!("mdvr: cannot save preferences: {error}");
+        }
     }
 
     #[allow(dead_code)]

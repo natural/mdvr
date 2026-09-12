@@ -64,6 +64,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   object URLs. A same-root SVG rendered in live WKWebView; unsupported formats,
   outside-root paths, symlink escapes, and stale grants remain denied. Evidence:
   [local resource](screenshots/local-resource.png).
+- Valid persisted text scale is loaded from conventional Application Support,
+  applied through validated appearance tokens, and retained while current root and
+  document are atomically saved. Isolated `HOME` runtime at 150% visibly enlarged
+  reader text and preserved scale while saving paths. Evidence:
+  [preferences appearance](screenshots/preferences-appearance.png).
 - Latest checkpoint verified debug build, 75 Rust tests/clippy and 16 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
@@ -85,7 +90,8 @@ The following remain unverified against a live embedded WKWebView: resize and
 clipping, keyboard/focus transitions, close/reopen and activation, picker
 interaction, embedded selection and clipboard behavior, reload selection/locator
 preservation, action bridge execution, CSP enforcement, Mermaid async output,
-remote resource consent, and appearance propagation.
+remote resource consent, dynamic system-appearance changes, imported themes, and
+window geometry restoration.
 
 Unit and Bun tests cover the corresponding pure/core behavior but do not close
 these app-evidence rows.
