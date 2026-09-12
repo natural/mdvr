@@ -96,7 +96,10 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   picker listed four Markdown files and opened `first.md`. Evidence:
   [picker](screenshots/picker.png), [opened document](screenshots/picker-open.png).
   Native focus plus Down/Up and Return keyboard handling also passed: Down then
-  Return opened `image.md`. Evidence: [keyboard open](screenshots/picker-keyboard-open.png).
+  Return opened `image.md`. Clicking the picker then typing `ban` changed the visible
+  query and reduced three entries to `banana.md`. Evidence:
+  [keyboard open](screenshots/picker-keyboard-open.png),
+  [picker filter](screenshots/picker-filter.png).
   While picker remains open, one-second background rescans atomically replace its
   entries while retaining selected path when present. Live removal of `a.md` and
   addition of `c.md` produced `b.md`/`c.md` without blocking. Evidence:
@@ -187,11 +190,14 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 - Post-fix window visibly renders `readme.md` through Orca. Relative navigation,
   reload, controls, history, picker, clipboard, themes, Finder/Dock lifecycle,
   local resources, and hostile-content scenarios have live evidence above.
+- Full-screen transition retained reader layout, all toolbar controls, document
+  content, and scrolling without visible clipping. Evidence:
+  [full screen](screenshots/full-screen.png).
 
 ## Unverified desktop behavior
 
-The following remain unverified against a live embedded WKWebView: resize and
-clipping, automated picker text filtering and broader focus transitions, live
+The following remain unverified against a live embedded WKWebView: arbitrary
+small-window resize clipping, broader focus transitions, live
 reload selection preservation, integrated remote-image completion after consent,
 and automated dynamic system-appearance switching. Hostile-content and restricted-file startup probes
 cover CSP-sensitive script/network paths, but no independent CSP report capture exists.
