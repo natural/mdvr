@@ -1,0 +1,9 @@
+{
+  "name": "mdvr-reader",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.0",
+  "scripts": {
+    "build": "bun build ./index.html --outdir dist --minify"
+  }
+}

@@ -1,0 +1,10 @@
+[package]
+name = "mdvr"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT"
+description = "Read-only macOS Markdown viewer"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui = { version = "=0.2.2", default-features = false }
