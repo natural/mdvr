@@ -136,7 +136,8 @@
           const placeholder = resourceElements.get(payload.resource);
           const value = payload.result?.bytes;
           if (!placeholder || !value || typeof value.mime !== 'string' || !Array.isArray(value.bytes)) return;
-          const url = URL.createObjectURL(new Blob([new Uint8Array(value.bytes)], { type: value.mime }));
+          const url = window.mdvrCreateResourceUrl?.(value.mime, value.bytes);
+          if (!url) return;
           const image = document.createElement('img');
           image.alt = placeholder.getAttribute('aria-label') || '';
           image.src = url;

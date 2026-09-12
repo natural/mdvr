@@ -121,7 +121,12 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   opened `space doc.md`, with one PID/window throughout. Evidence:
   [Finder reuse](screenshots/finder-reuse.png). After closing that window, Dock
   reopen loaded latest persisted `space doc.md`, not original process launch path.
-- Latest checkpoint verified debug build, 77 Rust tests/clippy and 22 web tests/build.
+- Hostile live fixture strips scripts, event handlers, CSS, frames, forms and
+  orphan form inputs. Local SVG bytes now pass renderer SVG sanitizer before Blob
+  creation, removing scripts, handlers and every href/xlink external reference.
+  Live WKWebView showed only safe text/image output. Evidence:
+  [hostile content](screenshots/hostile-content.png).
+- Latest checkpoint verified debug build, 77 Rust tests/clippy and 23 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 
@@ -150,9 +155,10 @@ these app-evidence rows.
 ## Security and policy gaps
 
 Local canonical-root/symlink policy has automated tests and live same-root
-resource transport evidence. Embedded hostile-content execution, outside-root
-consent, remote consent, DNS resolution and destination/connect-race protection,
-and actual HTTP fetch/redirect handling remain unverified.
+resource transport evidence. Embedded hostile HTML/SVG sanitization passed live
+fixture plus source regressions. Outside-root consent, remote consent, DNS
+resolution and destination/connect-race protection, and actual HTTP fetch/redirect
+handling remain unverified.
 
 ## Performance and distribution
 

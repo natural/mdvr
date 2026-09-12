@@ -5,6 +5,7 @@ import {
     mountDocument,
     renderDocument,
     renderMermaidAsync,
+    sanitizeGeneratedSvg,
     searchRendered,
     type RenderModel,
 } from "./document/renderer";
@@ -367,6 +368,19 @@ export function loadDocument(source: string, generation = 1): RenderModel {
     return model;
 }
 
+export function createResourceUrl(
+    mime: string,
+    bytes: number[],
+): string | null {
+    if (!/^image\/(?:png|jpeg|webp|svg\+xml)$/.test(mime)) return null;
+    const raw = new Uint8Array(bytes);
+    const body: BlobPart =
+        mime === "image/svg+xml"
+            ? sanitizeGeneratedSvg(new TextDecoder().decode(raw))
+            : raw;
+    return URL.createObjectURL(new Blob([body], { type: mime }));
+}
+
 export function searchDocument(query: string, caseSensitive = false) {
     return current ? searchRendered(current, query, caseSensitive) : [];
 }
@@ -375,4 +389,5 @@ Object.assign(window, {
     mdvrLoadDocument: loadDocument,
     mdvrSearchDocument: searchDocument,
     mdvrApplyAppearance: applyAppearance,
+    mdvrCreateResourceUrl: createResourceUrl,
 });

@@ -291,6 +291,13 @@ function fallbackSanitize(input: string, options: SanitizerOptions): string {
       const tag = name.toLowerCase();
       if (!ALLOWED_TAGS.includes(tag)) return "";
       if (close) return `</${tag}>`;
+      if (
+        tag === "input" &&
+        (!/\btype\s*=\s*(["']?)checkbox\1/i.test(rawAttrs) ||
+          !/\bdisabled(?:\s|=|>|$)/i.test(rawAttrs) ||
+          !/\btask-list-item-checkbox\b/i.test(rawAttrs))
+      )
+        return "";
       const attrs: string[] = [];
       for (const match of rawAttrs.matchAll(
         /([:\w-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g,
@@ -356,15 +363,27 @@ export function sanitizeHtml(
         : whole.replace(/\bsrc\s*=\s*(?:"[^"]*"|'[^']*')/i, "");
     },
   );
-  return DOMPurify.sanitize(routed, {
+  const fragment = DOMPurify.sanitize(routed, {
     ALLOWED_TAGS,
     ALLOWED_ATTR,
     FORBID_TAGS: ["style", "script", "iframe", "form", "object", "embed"],
     FORBID_ATTR: ["style"],
+    RETURN_DOM_FRAGMENT: true,
+  }) as DocumentFragment;
+  fragment.querySelectorAll("input").forEach((input) => {
+    if (
+      input.type !== "checkbox" ||
+      !input.disabled ||
+      !input.classList.contains("task-list-item-checkbox")
+    )
+      input.remove();
   });
+  const container = document.createElement("div");
+  container.append(fragment);
+  return container.innerHTML;
 }
 
-function sanitizeGeneratedSvg(input: string): string {
+export function sanitizeGeneratedSvg(input: string): string {
   const safe = input
     .replace(
       /<\/?(?:script|style)\b[^>]*>[\s\S]*?(?:<\/\s*(?:script|style)\s*>|$)/gi,
@@ -738,7 +757,7 @@ function makeMarkdown(
     const content = tokens[index]!.content;
     return content.replace(
       new RegExp(`${MATH_START}(\\d+)${MATH_END}`, "g"),
-      (_whole, value) => {
+      (_whole: string, value: string) => {
         const part = math[Number(value)]!;
         return renderMath(
           part.source,

@@ -8,9 +8,9 @@ import {
   renderMath,
   renderMermaid,
   restoreLocator,
+  sanitizeGeneratedSvg,
   sanitizeHtml,
   searchRendered,
-  slugifyHeading,
 } from "../src/document/renderer";
 
 const fixture = (path: string) =>
@@ -173,11 +173,19 @@ test("F malformed fixture reports useful bounded errors", async () => {
   expect(model.errors.map(({ kind }) => kind)).toContain("mermaid");
 });
 
+test("hostile SVG loses scripts, handlers, and external references", async () => {
+  const source = await (await fixture("security/hostile.svg")).text();
+  const sanitized = sanitizeGeneratedSvg(source);
+  expect(sanitized).not.toMatch(
+    /<script|onload|(?:xlink:)?href=|remote\.invalid|file:/i,
+  );
+});
+
 test("F security fixture produces no executable document content", async () => {
   const source = await (await fixture("security/hostile.md")).text();
   const model = renderDocument(source);
   expect(model.html).not.toMatch(
-    /<script|onload|onclick|<iframe|<form|<object|javascript:/i,
+    /<script|onload|onclick|<iframe|<form|<input|<object|javascript:/i,
   );
   expect(model.html).toContain("image-placeholder");
 });
