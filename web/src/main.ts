@@ -5,7 +5,7 @@ import {
     mountDocument,
     renderDocument,
     renderMermaidAsync,
-    sanitizeGeneratedSvg,
+    sanitizeResourceSvg,
     searchRendered,
     type RenderModel,
 } from "./document/renderer";
@@ -428,7 +428,7 @@ export async function createResourceUrl(
     }
     const body: BlobPart =
         mime === "image/svg+xml"
-            ? sanitizeGeneratedSvg(new TextDecoder().decode(raw))
+            ? sanitizeResourceSvg(new TextDecoder().decode(raw))
             : raw;
     return URL.createObjectURL(new Blob([body], { type: mime }));
 }

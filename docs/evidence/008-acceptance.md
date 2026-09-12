@@ -139,8 +139,10 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   [large rendered](screenshots/large-rendered.png).
 - Local GIF transport is now enabled but renderer decodes only first frame through
   `createImageBitmap` and converts it to PNG before display, preventing animation.
-  Full rendering fixture exposed PNG/JPEG/GIF/WebP/SVG entries in live WKWebView;
-  first-frame conversion has source regression coverage.
+  Full rendering fixture exposed PNG/JPEG/GIF/WebP/SVG, KaTeX, and asynchronously
+  completed Mermaid with themed readable labels in live WKWebView. Mermaid output
+  keeps bundled strict-mode executable/href stripping while local SVG uses stricter
+  DOM allowlist. Evidence: [rendering formats](screenshots/rendering-formats.png).
 - Reader theme chooser offers closed System/Light/Dark choices only. Native state
   persists override, reapplies validated tokens, and leaves System following live
   window appearance. Isolated live choice switched to Light and saved `"light"`.
@@ -184,8 +186,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 The following remain unverified against a live embedded WKWebView: resize and
 clipping, automated picker text filtering and broader focus transitions,
 reload selection/locator
-preservation, non-search action bridge execution, CSP enforcement, Mermaid async output,
-remote resource consent and automated dynamic system-appearance switching.
+preservation, CSP enforcement, remote resource consent and automated dynamic system-appearance switching.
 
 Unit and Bun tests cover the corresponding pure/core behavior but do not close
 these app-evidence rows.

@@ -8,8 +8,8 @@ import {
   renderMath,
   renderMermaid,
   restoreLocator,
-  sanitizeGeneratedSvg,
   sanitizeHtml,
+  sanitizeResourceSvg,
   searchRendered,
 } from "../src/document/renderer";
 
@@ -175,7 +175,7 @@ test("F malformed fixture reports useful bounded errors", async () => {
 
 test("hostile SVG loses scripts, handlers, and external references", async () => {
   const source = await (await fixture("security/hostile.svg")).text();
-  const sanitized = sanitizeGeneratedSvg(source);
+  const sanitized = sanitizeResourceSvg(source);
   expect(sanitized).not.toMatch(
     /<script|onload|(?:xlink:)?href=|remote\.invalid|file:/i,
   );

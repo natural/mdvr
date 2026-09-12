@@ -166,6 +166,25 @@ body {
 
 .reader .image-placeholder,
 .reader .render-error,
+.reader svg[id^="mdvr-mermaid-"] .node rect,
+.reader svg[id^="mdvr-mermaid-"] .node polygon,
+.reader svg[id^="mdvr-mermaid-"] .node path {
+  fill: var(--reader-code) !important;
+  stroke: var(--reader-accent) !important;
+}
+
+.reader svg[id^="mdvr-mermaid-"] text,
+.reader svg[id^="mdvr-mermaid-"] .label,
+.reader svg[id^="mdvr-mermaid-"] .nodeLabel,
+.reader svg[id^="mdvr-mermaid-"] .node foreignObject * {
+  fill: var(--reader-text) !important;
+  color: var(--reader-text) !important;
+}
+
+.reader svg[id^="mdvr-mermaid-"] .flowchart-link {
+  stroke: var(--reader-accent) !important;
+}
+
 .reader .diagram-pending,
 .reader .math-pending {
   display: block;

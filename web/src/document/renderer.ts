@@ -384,7 +384,7 @@ export function sanitizeHtml(
 }
 
 export function sanitizeGeneratedSvg(input: string): string {
-  const safe = input
+  return input
     .replace(
       /<\/?(?:script|style)\b[^>]*>[\s\S]*?(?:<\/\s*(?:script|style)\s*>|$)/gi,
       "",
@@ -393,11 +393,15 @@ export function sanitizeGeneratedSvg(input: string): string {
       /\s(?:on\w+|href|xlink:href)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi,
       "",
     );
+}
+
+export function sanitizeResourceSvg(input: string): string {
+  const safe = sanitizeGeneratedSvg(input);
   if (typeof document === "undefined" || typeof window === "undefined")
-    return safe;
+    return safe.replace(/<\/?foreignObject\b[^>]*>/gi, "");
   return DOMPurify.sanitize(safe, {
     USE_PROFILES: { svg: true, svgFilters: true },
-    FORBID_TAGS: ["script", "style"],
+    FORBID_TAGS: ["script", "style", "foreignObject"],
     FORBID_ATTR: ["style", "href", "xlink:href"],
   });
 }
@@ -579,6 +583,7 @@ export async function renderMermaidAsync(
         startOnLoad: false,
         securityLevel: "strict",
         theme: "base",
+        flowchart: { htmlLabels: false },
       });
       mermaidConfigured = true;
     }
