@@ -140,6 +140,7 @@ fn is_supported(action: &ActionMessage) -> bool {
             | ActionMessage::Focus(_)
             | ActionMessage::TextScale(_)
             | ActionMessage::History(_)
+            | ActionMessage::Theme(_)
     )
 }
 

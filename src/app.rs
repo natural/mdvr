@@ -177,7 +177,7 @@ fn dispatch_bridge_action(
             crate::contracts::TextScaleAction::Decrease => ShellCommand::DecreaseTextSize,
             crate::contracts::TextScaleAction::Reset => ShellCommand::ResetTextSize,
         }),
-        ActionMessage::History(_) => {}
+        ActionMessage::History(_) | ActionMessage::Theme(_) => {}
         ActionMessage::CapturePosition(_) | ActionMessage::RestorePosition(_) => {
             unreachable!("router filters bridge actions")
         }
@@ -447,9 +447,13 @@ impl MdvrView {
     }
 
     fn update_appearance(&mut self, window: &Window) {
-        let mode = match window.appearance() {
-            WindowAppearance::Dark | WindowAppearance::VibrantDark => AppearanceMode::Dark,
-            WindowAppearance::Light | WindowAppearance::VibrantLight => AppearanceMode::Light,
+        let mode = match self.preferences.theme.as_deref() {
+            Some("light") => AppearanceMode::Light,
+            Some("dark") => AppearanceMode::Dark,
+            _ => match window.appearance() {
+                WindowAppearance::Dark | WindowAppearance::VibrantDark => AppearanceMode::Dark,
+                WindowAppearance::Light | WindowAppearance::VibrantLight => AppearanceMode::Light,
+            },
         };
         if self.appearance_mode == Some(mode) {
             return;
@@ -460,7 +464,13 @@ impl MdvrView {
         let result = default_theme(mode)
             .tokens
             .with_scale(self.preferences.text_scale_percent)
-            .and_then(|tokens| tokens.as_revision_one());
+            .and_then(|tokens| tokens.as_revision_one())
+            .map(|mut appearance| {
+                if self.preferences.theme.is_none() {
+                    appearance.mode = crate::contracts::AppearanceMode::System;
+                }
+                appearance
+            });
         match (self.web_view.as_mut(), result) {
             (Some(web_view), Ok(appearance)) => {
                 match web_view.apply_appearance(&appearance, generation) {
@@ -535,6 +545,16 @@ impl MdvrView {
                     {
                         if matches!(action.action, ActionMessage::TextScale(_)) {
                             self.preferences.text_scale_percent = self.shell.text_scale_percent;
+                            self.appearance_mode = None;
+                            self.save_preferences();
+                            cx.notify();
+                        }
+                        if let ActionMessage::Theme(theme) = &action.action {
+                            self.preferences.theme = match theme {
+                                crate::contracts::ThemeAction::System => None,
+                                crate::contracts::ThemeAction::Light => Some("light".into()),
+                                crate::contracts::ThemeAction::Dark => Some("dark".into()),
+                            };
                             self.appearance_mode = None;
                             self.save_preferences();
                             cx.notify();

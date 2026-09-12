@@ -189,6 +189,8 @@ const syntaxProperties: Record<
 
 export function applyAppearance(value: unknown): boolean {
     if (!validateAppearanceTokens(value)) return false;
+    const theme = document.querySelector<HTMLSelectElement>("#theme");
+    if (theme) theme.value = value.mode;
     const rootStyle = document.documentElement.style;
     rootStyle.setProperty("--reader-background", value.reader_background);
     rootStyle.setProperty("--reader-text", value.reader_foreground);

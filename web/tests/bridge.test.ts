@@ -59,6 +59,15 @@ test("history controls and shortcuts stay native-owned", () => {
   expect(html).not.toContain("history.back");
 });
 
+test("theme chooser sends only closed native choices", () => {
+  expect(html).toContain('aria-label="Reader theme"');
+  expect(html).toContain("kind: 'theme'");
+  expect(html).toContain(
+    "['system', 'light', 'dark'].includes(action.payload)",
+  );
+  expect(main).toContain("theme.value = value.mode");
+});
+
 test("text scale shortcuts stay native-owned", () => {
   expect(html).toContain("kind: 'text_scale'");
   expect(html).toContain("['+', '=', '-', '0'].includes(event.key)");

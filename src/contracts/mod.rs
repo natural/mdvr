@@ -487,6 +487,8 @@ pub enum ActionMessage {
     TextScale(TextScaleAction),
     #[serde(rename = "history")]
     History(HistoryAction),
+    #[serde(rename = "theme")]
+    Theme(ThemeAction),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -512,6 +514,14 @@ pub enum HistoryAction {
     Back,
     Forward,
     Reload,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemeAction {
+    System,
+    Light,
+    Dark,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

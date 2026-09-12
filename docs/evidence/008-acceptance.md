@@ -136,7 +136,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   `createImageBitmap` and converts it to PNG before display, preventing animation.
   Full rendering fixture exposed PNG/JPEG/GIF/WebP/SVG entries in live WKWebView;
   first-frame conversion has source regression coverage.
-- Latest checkpoint verified debug build, 78 Rust tests/clippy and 24 web tests/build.
+- Reader theme chooser offers closed System/Light/Dark choices only. Native state
+  persists override, reapplies validated tokens, and leaves System following live
+  window appearance. Isolated live choice switched to Light and saved `"light"`.
+  Evidence: [light theme](screenshots/theme-light.png).
+- Latest checkpoint verified debug build, 78 Rust tests/clippy and 25 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 
