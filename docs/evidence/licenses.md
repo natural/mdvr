@@ -26,7 +26,7 @@ Mermaid brings its own locked runtime dependency graph, including parser,
 Chevrotain, D3, Cytoscape, ELK, KaTeX, and DOMPurify packages. Their versions,
 integrity hashes, and dependency relationships are recorded in `bun.lock`.
 `THIRD_PARTY_NOTICES.md` deterministically inventories 124 installed web packages
-and 96 Cargo packages in the pinned `reqwest` remote-fetch graph. Every listed
+and 107 Cargo packages in pinned `reqwest` and `ignore` runtime graphs. Every listed
 package includes discovered license/notice text with zero missing files.
 
 ## Bundling and network facts

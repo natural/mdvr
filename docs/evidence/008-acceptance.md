@@ -47,6 +47,9 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 - Runtime regression command:
   `swift scripts/verify/check-renderer.swift web/dist/index.html` passed.
   This probes actual WKWebView loading and asserts rendered heading content.
+- Renderer compatibility regressions now retain GitHub heading underscores, keep
+  dollar-delimited text inside inline code literal, and use content-fingerprint block
+  IDs with duplicate suffixes instead of insertion-sensitive ordinals.
 - Orca confirmed `target/debug/mdvr readme.md` visibly renders headings, links,
   paragraphs, and code blocks on macOS 26.7 (25G229), arm64. Evidence:
   [rendered readme](screenshots/readme-rendered.png). This uses native code from
@@ -77,7 +80,10 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   buttons move wrapped literal matches, Match case controls comparison, and Escape
   closes and restores document focus.
   Live WKWebView found and selected `GPUI`; revision-1 search actions reached native
-  bridge context. Evidence: [search](screenshots/search.png).
+  bridge context. Browser search now builds block-aware text maps, spans inline DOM
+  boundaries, and excludes controls. Restricted WKWebView probe finds `hello world`
+  across plain/`<strong>` nodes as one logical two-mark match. Evidence:
+  [search](screenshots/search.png).
 - Every fenced block exposes an accessible Copy button. Live WKWebView copy of
   first `readme.md` block produced exact source
   `xcodebuild -downloadComponent MetalToolchain` on pasteboard; fallback uses a
@@ -97,7 +103,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   back/forward, and reload restore only after matching source mount. Live
   document stayed at paragraphs 26–Target after editing paragraph 0 and reload.
   Evidence: [reload position](screenshots/reload-position.png). Unchanged-selection
-  restoration retains source regression coverage; dedicated live selection proof remains open.
+  Restricted WKWebView probe now selects `hello world` across plain/strong nodes,
+  inserts a block before it, reloads, and verifies exact selection survives. Stable
+  content fingerprints prevent preceding insertions from shifting block identity;
+  changed blocks restore only uniquely matching selection text. Dedicated GPUI-hosted
+  selection pixels remain open.
 - Directory launch now starts ignore-aware discovery off GPUI thread, applies
   bounded progressive batches to native picker state, and opens selected files
   into same window. Missing GPUI `font-kit` feature caused invisible text; enabling
@@ -165,7 +175,9 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 - Hostile live fixture strips scripts, event handlers, CSS, frames, forms and
   orphan form inputs. Local SVG bytes now pass renderer SVG sanitizer before Blob
   creation, removing scripts, handlers and every href/xlink external reference.
-  Live WKWebView showed only safe text/image output. Evidence:
+  Raw HTML `<img src>` now becomes the same retryable native-broker placeholder as
+  Markdown images rather than disappearing or bypassing policy. Live WKWebView showed
+  only safe text/image output. Evidence:
   [hostile content](screenshots/hostile-content.png).
 - Files above 10 MiB now stop on visible full-load confirmation, including
   navigation/Finder/CLI replacement of an existing document; confirmed files
@@ -205,7 +217,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   [rendered copy and select all](screenshots/rendered-copy-select-all.png).
 - Renderer posts closed `render.ready` only after synchronous DOM mount; native
   bridge rejects stale document/generation and records commit-to-ready latency.
-- Latest local verification passed 87 Rust tests/clippy, 32 web tests/build,
+- Latest local verification passed 88 Rust tests/clippy, 36 web tests/build,
   restricted-file WKWebView probe, current release build, app inspection, and DMG
   inspection.
 
@@ -277,9 +289,9 @@ single-code-block fixture across five cold process launches: 411.2, 426.2, 435.1
 renderer cleanup removed per-block duplicate sanitization and linear scans while
 retaining one full-document sanitization. The checked `scripts/verify/measure-reload.py` harness generated a 1,048,595-byte
 prose fixture with 2,198 blocks and measured warm reload commit-to-ready times of
-188.8, 179.6, 183.8, 179.8, and 181.0 ms (median 181.0 ms); observed save-to-ready
-totals including poll/debounce were 331.9, 327.8, 318.0, 312.9, and 321.7 ms
-(median 321.7 ms). This meets the <200 ms post-debounce target by median on the provisional M2 Pro,
+205.4, 180.7, 183.0, 196.1, and 194.3 ms (median 194.3 ms); observed save-to-ready
+totals including poll/debounce were 333.8, 318.3, 300.4, 349.8, and 335.4 ms
+(median 333.8 ms). This meets the <200 ms post-debounce target by median on the provisional M2 Pro,
 not the unavailable M1 baseline. Rustup 1.29.1 supplied pinned Rust 1.98.1 arm64
 and x86_64 targets; both release slices compiled and `lipo` produced verified
 `x86_64 arm64` app and compressed DMG. Native arm64 launch passes; forcing x86_64
@@ -294,8 +306,8 @@ on every push/PR. Original
 project icon is generated into ICNS. Universal build pins
 `MACOSX_DEPLOYMENT_TARGET=11.0`; bundle minimum matches both arm64 and x86_64
 `LC_BUILD_VERSION` values and inspection enforces each slice. Deterministic notices
-include license text for all 124 installed web packages plus 96 remote-fetch Cargo
-packages and are bundled with project license; full native GPUI dependency review
+include license text for all 124 installed web packages plus 107 remote-fetch/discovery
+Cargo packages and are bundled with project license; full native GPUI dependency review
 and final legal review remain external. No clean-machine test,
 signing, notarization, or Gatekeeper evidence exists.
 

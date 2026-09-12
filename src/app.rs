@@ -128,6 +128,13 @@ fn navigation_target_text(target: &NavigationTarget) -> String {
     }
 }
 
+fn valid_external_http(url: &str) -> bool {
+    if url.len() > 4 * 1024 || url.contains(char::is_control) {
+        return false;
+    }
+    reqwest::Url::parse(url).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
+}
+
 fn valid_mailto(url: &str) -> bool {
     url.len() <= 2 * 1024
         && url
@@ -1184,10 +1191,7 @@ impl MdvrView {
             Ok(NavigationAction::Load(load)) => self.load_navigation(load, cx),
             Ok(NavigationAction::External(target)) => match target {
                 NavigationTarget::Http { url } => {
-                    let allowed = RemotePolicy::new(RemoteLimits::default())
-                        .and_then(|policy| policy.authorize(&url))
-                        .is_ok();
-                    if !allowed || !open_external_url(&url) {
+                    if !valid_external_http(&url) || !open_external_url(&url) {
                         eprintln!("mdvr: external URL rejected");
                     }
                 }
@@ -1713,6 +1717,14 @@ mod tests {
             ..Preferences::default()
         };
         assert_eq!(missing_dock_document(&plan, &preferences), Some(path));
+    }
+
+    #[test]
+    fn explicit_browser_links_allow_localhost_but_reject_other_schemes() {
+        assert!(valid_external_http("http://localhost:3000/docs"));
+        assert!(valid_external_http("https://example.com/docs"));
+        assert!(!valid_external_http("javascript:alert(1)"));
+        assert!(!valid_external_http("https://example.com/\nheader"));
     }
 
     #[test]

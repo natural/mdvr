@@ -13,12 +13,30 @@ final class RendererProbe: NSObject, WKNavigationDelegate {
         webView.evaluateJavaScript("""
             (() => {
                 if (typeof window.mdvrLoadDocument !== 'function') return false;
-                window.mdvrLoadDocument('# Renderer probe', 1);
-                return document.querySelector('#document h1')?.textContent === 'Renderer probe';
+                const source = '# Renderer probe\\n\\nhello **world**\\n\\n<img src="assets/raw.png" alt="raw">\\n\\n`$literal$` and $math$';
+                window.mdvrLoadDocument(source, 1);
+                const paragraph = [...document.querySelectorAll('#document p')].find((node) => node.textContent === 'hello world');
+                const range = document.createRange();
+                range.setStart(paragraph.firstChild, 0);
+                range.setEnd(paragraph.querySelector('strong').firstChild, 5);
+                getSelection().removeAllRanges();
+                getSelection().addRange(range);
+                window.mdvrLoadDocument('# Inserted\\n\\n' + source, 2);
+                const selectionPreserved = getSelection().toString() === 'hello world';
+                const foundAcrossInlineNodes = window.mdvrFind('hello world', false, false);
+                return [
+                    document.querySelector('#document h1')?.textContent === 'Inserted',
+                    selectionPreserved,
+                    foundAcrossInlineNodes,
+                    document.querySelectorAll('mark[data-mdvr-search="0"]').length === 2,
+                    document.querySelector('code')?.textContent === '$literal$',
+                    Boolean(document.querySelector('.katex')),
+                    document.querySelector('img[data-mdvr-resource="assets/raw.png"]') !== null,
+                ];
             })()
             """) { result, error in
-                guard error == nil, result as? Bool == true else {
-                    print("FAIL: bundled renderer did not render Markdown")
+                guard error == nil, let checks = result as? [Bool], checks.allSatisfy({ $0 }) else {
+                    print("FAIL: bundled renderer checks failed: \(String(describing: result)) \(String(describing: error))")
                     exit(1)
                 }
                 print("PASS: restricted file-URL renderer rendered Markdown")

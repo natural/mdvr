@@ -18,12 +18,13 @@ const fixture = (path: string) =>
 
 test("renders duplicate and Unicode heading IDs", () => {
   const model = renderDocument(
-    "# Duplicate Heading\n\n# Duplicate Heading\n\n# Café — 日本語",
+    "# Duplicate Heading\n\n# Duplicate Heading\n\n# Café — 日本語\n\n# Under_score",
   );
   expect(model.headings.map(({ id }) => id)).toEqual([
     "duplicate-heading",
     "duplicate-heading-1",
     "café--日本語",
+    "under_score",
   ]);
 });
 
@@ -39,6 +40,12 @@ test("sanitizes hostile HTML and dangerous URLs by explicit allowlist", () => {
   expect(html).not.toContain("style");
   expect(html).not.toContain("file:");
   expect(html).not.toContain("javascript:");
+});
+
+test("routes raw HTML images through the native broker", () => {
+  const model = renderDocument('<img src="assets/raw.png" alt="raw">');
+  expect(model.html).toContain('data-mdvr-resource="assets/raw.png"');
+  expect(model.html).not.toContain('src="assets/raw.png"');
 });
 
 test("preserves exact code and keeps unknown fences plain", () => {
@@ -98,6 +105,13 @@ test("renders tables, read-only tasks, links, images, and literal code search", 
   ]);
 });
 
+test("does not interpret dollar math inside inline code", () => {
+  const model = renderDocument("`$literal$` and $math$");
+  expect(model.html).toContain("<code>$literal$</code>");
+  expect(model.html).toContain("katex");
+  expect(model.errors).toEqual([]);
+});
+
 test("returns bounded Mermaid and math states", () => {
   expect(renderMermaid("flowchart LR\n  A --> B").status).toBe("pending");
   expect(renderMermaid("flowchart LR\n  A -->").status).toBe("error");
@@ -113,10 +127,13 @@ test("restores exact locator, heading fallback, and clears affected selection", 
   const after = renderDocument(
     "# Stable\n\nselected content\nchanged\n\n# Other",
   );
+  const paragraph = before.blocks.find(
+    (block) => block.text === "selected content",
+  )!;
   const selection = {
-    startBlockId: "paragraph-1",
+    startBlockId: paragraph.id,
     startOffset: 0,
-    endBlockId: "paragraph-1",
+    endBlockId: paragraph.id,
     endOffset: 16,
     text: "selected content",
   };
@@ -125,10 +142,25 @@ test("restores exact locator, heading fallback, and clears affected selection", 
     preserveSelection({ ...selection, text: "removed", endOffset: 7 }, after),
   ).toBeNull();
   expect(
-    restoreLocator({ block: "missing", heading: "stable", offset: 2 }, after),
-  ).toEqual({ blockId: "heading-1", offset: 2, reason: "heading" });
+    preserveSelection(
+      {
+        ...selection,
+        startBlockId: "missing",
+        text: "duplicate",
+        endOffset: 9,
+      },
+      renderDocument("duplicate\n\nduplicate"),
+    ),
+  ).toBeNull();
   expect(
-    restoreLocator({ block: "paragraph-1", offset: 1 }, before).reason,
+    restoreLocator({ block: "missing", heading: "stable", offset: 2 }, after),
+  ).toEqual({
+    blockId: after.headings.find((heading) => heading.id === "stable")!.blockId,
+    offset: 2,
+    reason: "heading",
+  });
+  expect(
+    restoreLocator({ block: paragraph.id, offset: 1 }, before).reason,
   ).toBe("exact_block");
 });
 

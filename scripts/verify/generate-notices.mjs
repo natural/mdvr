@@ -56,6 +56,8 @@ const tree = Bun.spawnSync(
     "--locked",
     "--package",
     "reqwest",
+    "--package",
+    "ignore",
     "--target",
     "aarch64-apple-darwin",
     "--edges",

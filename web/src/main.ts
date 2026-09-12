@@ -229,14 +229,72 @@ export function applyAppearance(value: unknown): boolean {
 const gate = new GenerationGate();
 let current: RenderModel | null = null;
 
+function textNodes(element: HTMLElement): Text[] {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const nodes: Text[] = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode())
+        if (!node.parentElement?.closest("button")) nodes.push(node as Text);
+    return nodes;
+}
+
+function pointAt(element: HTMLElement, offset: number): [Text, number] | null {
+    let consumed = 0;
+    for (const node of textNodes(element)) {
+        if (offset <= consumed + node.length)
+            return [node, Math.max(0, offset - consumed)];
+        consumed += node.length;
+    }
+    return null;
+}
+
+function pointOffset(element: HTMLElement, node: Node, offset: number): number {
+    let consumed = 0;
+    for (const text of textNodes(element)) {
+        if (text === node) return consumed + offset;
+        consumed += text.length;
+    }
+    return consumed;
+}
+
+function selectionBlock(node: Node): HTMLElement | null {
+    return (
+        (node instanceof Element
+            ? node
+            : node.parentElement
+        )?.closest<HTMLElement>("[data-block-id]") ?? null
+    );
+}
+
 function captureView() {
     const block = Array.from(
         root.querySelectorAll<HTMLElement>("[data-block-id]"),
     ).find((element) => element.getBoundingClientRect().bottom > 0);
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const startBlock = range ? selectionBlock(range.startContainer) : null;
+    const endBlock = range ? selectionBlock(range.endContainer) : null;
+    const selected =
+        range && !range.collapsed && startBlock && endBlock
+            ? {
+                  text: range.toString(),
+                  startBlock: startBlock.dataset.blockId!,
+                  startOffset: pointOffset(
+                      startBlock,
+                      range.startContainer,
+                      range.startOffset,
+                  ),
+                  endBlock: endBlock.dataset.blockId!,
+                  endOffset: pointOffset(
+                      endBlock,
+                      range.endContainer,
+                      range.endOffset,
+                  ),
+              }
+            : null;
     return {
         block: block?.dataset.blockId,
         top: block?.getBoundingClientRect().top ?? 0,
-        selection: window.getSelection()?.toString() ?? "",
+        selection: selected,
     };
 }
 
@@ -248,38 +306,29 @@ function restoreView(view: ReturnType<typeof captureView>) {
         if (block)
             window.scrollBy(0, block.getBoundingClientRect().top - view.top);
     }
-    if (!view.selection) return;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    const nodes: Text[] = [];
-    let text = "";
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        nodes.push(node as Text);
-        text += node.textContent ?? "";
+    if (!view.selection?.text) return;
+    const startBlock = root.querySelector<HTMLElement>(
+        `[data-block-id="${CSS.escape(view.selection.startBlock)}"]`,
+    );
+    const endBlock = root.querySelector<HTMLElement>(
+        `[data-block-id="${CSS.escape(view.selection.endBlock)}"]`,
+    );
+    let start = startBlock && pointAt(startBlock, view.selection.startOffset);
+    let end = endBlock && pointAt(endBlock, view.selection.endOffset);
+    if (!start || !end) {
+        const nodes = textNodes(root);
+        const text = nodes.map((node) => node.data).join("");
+        const index = text.indexOf(view.selection.text);
+        if (index < 0 || text.indexOf(view.selection.text, index + 1) >= 0)
+            return;
+        start = pointAt(root, index);
+        end = pointAt(root, index + view.selection.text.length);
     }
-    const start = text.indexOf(view.selection);
-    if (start < 0) return;
-    let offset = 0;
-    let startNode: Text | undefined;
-    let endNode: Text | undefined;
-    let startOffset = 0;
-    let endOffset = 0;
-    for (const node of nodes) {
-        const length = node.data.length;
-        if (!startNode && start <= offset + length) {
-            startNode = node;
-            startOffset = start - offset;
-        }
-        if (start + view.selection.length <= offset + length) {
-            endNode = node;
-            endOffset = start + view.selection.length - offset;
-            break;
-        }
-        offset += length;
-    }
-    if (!startNode || !endNode) return;
+    if (!start || !end) return;
     const range = document.createRange();
-    range.setStart(startNode, startOffset);
-    range.setEnd(endNode, endOffset);
+    range.setStart(...start);
+    range.setEnd(...end);
+    if (range.toString() !== view.selection.text) return;
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
@@ -370,6 +419,12 @@ export function loadDocument(source: string, generation = 1): RenderModel {
     current = model;
     mountDocument(root, model);
     domSearch = { query: "", caseSensitive: false, ranges: [], index: -1 };
+    restoreView(view);
+    installOutline(model);
+    installCodeCopy(model);
+    (
+        window as Window & { mdvrRequestResources?: () => void }
+    ).mdvrRequestResources?.();
     setTimeout(() => {
         (
             window as Window & {
@@ -380,12 +435,6 @@ export function loadDocument(source: string, generation = 1): RenderModel {
             }
         ).mdvrPostRenderReady?.(model.headings, generation);
     }, 0);
-    restoreView(view);
-    installOutline(model);
-    installCodeCopy(model);
-    (
-        window as Window & { mdvrRequestResources?: () => void }
-    ).mdvrRequestResources?.();
     void finishMermaid(model, generation);
     return model;
 }
@@ -473,35 +522,64 @@ export function findInDocument(
             mark.replaceWith(...Array.from(mark.childNodes)),
         );
         root.normalize();
-        const ranges: Range[] = [];
         const needle = caseSensitive ? query : query.toLocaleLowerCase();
+        const nodes: Array<{ node: Text; start: number; end: number }> = [];
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let text = "";
+        let previousBlock: Element | null = null;
         for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-            const text = node.textContent ?? "";
-            const haystack = caseSensitive ? text : text.toLocaleLowerCase();
-            for (let from = 0; from <= haystack.length - needle.length; ) {
-                const index = haystack.indexOf(needle, from);
-                if (index < 0) break;
-                const range = document.createRange();
-                range.setStart(node, index);
-                range.setEnd(node, index + query.length);
-                ranges.push(range);
-                from = index + Math.max(needle.length, 1);
+            const value = node.textContent ?? "";
+            const parent = node.parentElement;
+            if (!value || parent?.closest("button, [aria-hidden=true]"))
+                continue;
+            const block = parent?.closest("[data-block-id]") ?? null;
+            if (text && block !== previousBlock) text += "\n";
+            const start = text.length;
+            text += value;
+            nodes.push({ node: node as Text, start, end: text.length });
+            previousBlock = block;
+        }
+        const haystack = caseSensitive ? text : text.toLocaleLowerCase();
+        const matches: Array<{ start: number; end: number }> = [];
+        for (let from = 0; from <= haystack.length - needle.length; ) {
+            const index = haystack.indexOf(needle, from);
+            if (index < 0) break;
+            matches.push({ start: index, end: index + query.length });
+            from = index + Math.max(needle.length, 1);
+        }
+        for (const { node, start, end } of nodes) {
+            const overlaps = matches
+                .map((match, index) => ({
+                    index,
+                    start: Math.max(0, match.start - start),
+                    end: Math.min(end - start, match.end - start),
+                }))
+                .filter((match) => match.start < match.end);
+            if (!overlaps.length) continue;
+            const fragment = document.createDocumentFragment();
+            const value = node.data;
+            let cursor = 0;
+            for (const overlap of overlaps) {
+                fragment.append(value.slice(cursor, overlap.start));
+                const mark = document.createElement("mark");
+                mark.dataset.mdvrSearch = String(overlap.index);
+                mark.textContent = value.slice(overlap.start, overlap.end);
+                fragment.append(mark);
+                cursor = overlap.end;
             }
+            fragment.append(value.slice(cursor));
+            node.replaceWith(fragment);
         }
-        for (let index = ranges.length - 1; index >= 0; index--) {
-            const mark = document.createElement("mark");
-            mark.dataset.mdvrSearch = "";
-            ranges[index]!.surroundContents(mark);
-        }
-        const markedRanges = Array.from(
-            root.querySelectorAll("mark[data-mdvr-search]"),
-            (mark) => {
-                const range = document.createRange();
-                range.selectNodeContents(mark);
-                return range;
-            },
-        );
+        const markedRanges = matches.flatMap((_, index) => {
+            const marks = root.querySelectorAll(
+                `mark[data-mdvr-search="${index}"]`,
+            );
+            if (!marks.length) return [];
+            const range = document.createRange();
+            range.setStartBefore(marks[0]!);
+            range.setEndAfter(marks[marks.length - 1]!);
+            return [range];
+        });
         domSearch = {
             query,
             caseSensitive,

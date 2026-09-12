@@ -207,8 +207,19 @@
           resourceElements.clear();
           remoteResources.length = 0;
           if (!navigationContext) return;
-          for (const placeholder of document.querySelectorAll('#document [data-mdvr-resource]')) {
+          for (const candidate of document.querySelectorAll('#document [data-mdvr-resource]')) {
+            let placeholder = candidate;
             const reference = placeholder.getAttribute('data-mdvr-resource');
+            if (placeholder instanceof HTMLImageElement) {
+              const replacement = document.createElement('span');
+              replacement.className = 'image-placeholder';
+              replacement.setAttribute('role', 'img');
+              replacement.setAttribute('aria-label', placeholder.alt || 'Image unavailable');
+              replacement.setAttribute('data-mdvr-resource', reference || '');
+              replacement.textContent = `[image: ${placeholder.alt || 'Image unavailable'}]`;
+              placeholder.replaceWith(replacement);
+              placeholder = replacement;
+            }
             if (!reference || reference.startsWith('//')) continue;
             if (/^https?:\/\//i.test(reference)) remoteResources.push({ placeholder, reference });
             else if (!/^[a-z][a-z0-9+.-]*:/i.test(reference)) requestResource(placeholder, reference, false);
@@ -252,7 +263,7 @@
             return;
           }
           const image = document.createElement('img');
-          image.alt = placeholder.getAttribute('aria-label') || '';
+          image.alt = placeholder.getAttribute('aria-label') || placeholder.getAttribute('alt') || '';
           image.src = url;
           resourceUrls.add(url);
           placeholder.replaceWith(image);

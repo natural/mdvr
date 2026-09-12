@@ -48,6 +48,17 @@ test("GIF resources are frozen to first PNG frame", () => {
   expect(main).toContain('canvas.toBlob(resolve, "image/png")');
 });
 
+test("document search spans inline nodes and excludes controls", () => {
+  expect(main).toContain('parent?.closest("button, [aria-hidden=true]")');
+  expect(main).toContain("matches.flatMap((_, index)");
+  expect(main).toContain("range.setStartBefore(marks[0]!)");
+});
+
+test("raw HTML image placeholders remain retryable", () => {
+  expect(html).toContain("placeholder instanceof HTMLImageElement");
+  expect(html).toContain("placeholder.replaceWith(replacement)");
+});
+
 test("narrow layout hides outline and keeps toolbar clear of content", () => {
   expect(html).toContain("@media (max-width: 38rem)");
   expect(html).toContain(
@@ -128,7 +139,7 @@ test("document search is keyboard accessible and wraps", () => {
   expect(main).toContain(
     "document.createTreeWalker(root, NodeFilter.SHOW_TEXT)",
   );
-  expect(main).toContain('mark.dataset.mdvrSearch = ""');
+  expect(main).toContain("mark.dataset.mdvrSearch = String(overlap.index)");
   expect(html).toContain("window.mdvrRestoreSearchSelection?.()");
   expect(html).toContain("case_sensitive: searchCase.checked");
   expect(html).toContain("event.key === 'Escape'");
@@ -138,7 +149,8 @@ test("reload restores visible block and unchanged selection", () => {
   expect(main).toContain("const view = captureView()");
   expect(main).toContain("restoreView(view)");
   expect(main).toContain("CSS.escape(view.block)");
-  expect(main).toContain("text.indexOf(view.selection)");
+  expect(main).toContain("text.indexOf(view.selection.text)");
+  expect(main).toContain("view.selection.startBlock");
 });
 
 test("outline is generated safely from rendered headings", () => {

@@ -369,7 +369,7 @@ fn discover_paths(root: &Path) -> Result<Vec<String>, DiscoveryFailure> {
         return Err(DiscoveryFailure::NotADirectory(root.to_owned()));
     }
     let mut paths = Vec::new();
-    walk(root, Path::new(""), &[], &mut |relative, _| {
+    walk(root, &mut |relative, _| {
         paths.push(relative.to_string_lossy().replace('\\', "/"));
         Ok(true)
     })?;
@@ -387,7 +387,7 @@ fn discover_paths_if_current(
     let mut pending = Vec::with_capacity(MAX_BATCH_ITEMS);
     let mut batches = Vec::new();
     let mut matched = 0;
-    let result = walk(root, Path::new(""), &[], &mut |relative, _| {
+    let result = walk(root, &mut |relative, _| {
         if cancelled.load(Ordering::Acquire) || active.load(Ordering::Acquire) != scan_id.get() {
             return Ok(false);
         }
@@ -431,12 +431,6 @@ fn map_discovery_error(path: &Path, error: std::io::Error) -> DiscoveryFailure {
     }
 }
 
-fn is_hidden(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with('.'))
-}
-
 fn is_markdown(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -445,170 +439,38 @@ fn is_markdown(path: &Path) -> bool {
         })
 }
 
-fn walk<F>(
-    root: &Path,
-    relative_dir: &Path,
-    inherited: &[IgnoreRule],
-    on_file: &mut F,
-) -> Result<(), DiscoveryFailure>
+fn walk<F>(root: &Path, on_file: &mut F) -> Result<(), DiscoveryFailure>
 where
     F: FnMut(&Path, &Path) -> Result<bool, DiscoveryFailure>,
 {
-    let directory = root.join(relative_dir);
-    let mut rules = inherited.to_vec();
-    rules.extend(read_ignore_rules(&directory, relative_dir)?);
-    let entries =
-        fs::read_dir(&directory).map_err(|error| map_discovery_error(&directory, error))?;
-    let mut children = entries
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| map_discovery_error(&directory, error))?;
-    children.sort_by_key(|entry| entry.file_name());
-    for entry in children {
-        let name = entry.file_name();
-        let child_relative = relative_dir.join(&name);
-        if is_hidden(&child_relative) {
+    let mut builder = ignore::WalkBuilder::new(root);
+    builder
+        .hidden(true)
+        .ignore(false)
+        .git_ignore(true)
+        .require_git(false)
+        .git_global(false)
+        .git_exclude(false)
+        .parents(false)
+        .follow_links(false)
+        .sort_by_file_path(|left, right| left.cmp(right));
+    for result in builder.build() {
+        let entry = result.map_err(|_| DiscoveryFailure::Unreadable(root.to_owned()))?;
+        if entry.path() == root {
             continue;
         }
-        let link_metadata = fs::symlink_metadata(entry.path())
-            .map_err(|error| map_discovery_error(&entry.path(), error))?;
-        let is_link = link_metadata.file_type().is_symlink();
-        let metadata = match fs::metadata(entry.path()) {
-            Ok(metadata) => metadata,
-            Err(_error) if is_link => continue,
-            Err(error) => return Err(map_discovery_error(&entry.path(), error)),
-        };
-        let is_dir = metadata.is_dir();
-        if ignored(&child_relative, is_dir, &rules) {
-            continue;
-        }
-        if is_dir {
-            if is_link {
-                continue;
-            }
-            walk(root, &child_relative, &rules, on_file)?;
-        } else if metadata.is_file()
-            && is_markdown(&child_relative)
-            && !on_file(&child_relative, &entry.path())?
-        {
+        let relative = entry
+            .path()
+            .strip_prefix(root)
+            .map_err(|_| DiscoveryFailure::Unreadable(entry.path().to_owned()))?;
+        let is_file = entry.file_type().is_some_and(|kind| kind.is_file())
+            || entry.file_type().is_some_and(|kind| kind.is_symlink())
+                && fs::metadata(entry.path()).is_ok_and(|metadata| metadata.is_file());
+        if is_file && is_markdown(relative) && !on_file(relative, entry.path())? {
             return Ok(());
         }
     }
     Ok(())
-}
-
-#[derive(Clone, Debug)]
-struct IgnoreRule {
-    base: PathBuf,
-    pattern: String,
-    negated: bool,
-    directory_only: bool,
-    anchored: bool,
-}
-
-fn read_ignore_rules(
-    directory: &Path,
-    relative_dir: &Path,
-) -> Result<Vec<IgnoreRule>, DiscoveryFailure> {
-    let path = directory.join(".gitignore");
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_) => return Err(DiscoveryFailure::Unreadable(path)),
-    };
-    Ok(text
-        .lines()
-        .filter_map(|line| parse_rule(line, relative_dir))
-        .collect())
-}
-
-fn parse_rule(line: &str, base: &Path) -> Option<IgnoreRule> {
-    let mut pattern = line.trim().to_owned();
-    if pattern.is_empty() || pattern.starts_with('#') {
-        return None;
-    }
-    let negated = pattern.starts_with('!') && !pattern.starts_with("\\!");
-    if negated {
-        pattern.remove(0);
-    }
-    let directory_only = pattern.ends_with('/');
-    if directory_only {
-        pattern.pop();
-    }
-    let anchored = pattern.starts_with('/');
-    if anchored {
-        pattern.remove(0);
-    }
-    if pattern.is_empty() {
-        return None;
-    }
-    Some(IgnoreRule {
-        base: base.to_owned(),
-        pattern,
-        negated,
-        directory_only,
-        anchored,
-    })
-}
-
-fn ignored(path: &Path, is_dir: bool, rules: &[IgnoreRule]) -> bool {
-    let mut ignored = false;
-    for rule in rules {
-        let Ok(relative) = path.strip_prefix(&rule.base) else {
-            continue;
-        };
-        let candidate = relative.to_string_lossy().replace('\\', "/");
-        let matches = if rule.pattern.contains('/') {
-            if rule.anchored {
-                glob_matches(&rule.pattern, &candidate)
-            } else {
-                candidate.split_once('/').map_or_else(
-                    || glob_matches(&rule.pattern, &candidate),
-                    |_| {
-                        candidate.split('/').enumerate().any(|(index, _)| {
-                            glob_matches(
-                                &rule.pattern,
-                                &candidate
-                                    .split('/')
-                                    .skip(index)
-                                    .collect::<Vec<_>>()
-                                    .join("/"),
-                            )
-                        })
-                    },
-                )
-            }
-        } else {
-            candidate
-                .split('/')
-                .any(|part| glob_matches(&rule.pattern, part))
-        };
-        if matches && (!rule.directory_only || is_dir) {
-            ignored = !rule.negated;
-        }
-    }
-    ignored
-}
-
-fn glob_matches(pattern: &str, value: &str) -> bool {
-    fn go(pattern: &[char], value: &[char]) -> bool {
-        match pattern.first() {
-            None => value.is_empty(),
-            Some('*') => {
-                if pattern.get(1) == Some(&'*') {
-                    go(&pattern[1..], value) || (!value.is_empty() && go(pattern, &value[1..]))
-                } else {
-                    go(&pattern[1..], value)
-                        || (!value.is_empty() && value[0] != '/' && go(pattern, &value[1..]))
-                }
-            }
-            Some('?') => !value.is_empty() && value[0] != '/' && go(&pattern[1..], &value[1..]),
-            Some(character) => value.first() == Some(character) && go(&pattern[1..], &value[1..]),
-        }
-    }
-    go(
-        &pattern.chars().collect::<Vec<_>>(),
-        &value.chars().collect::<Vec<_>>(),
-    )
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -947,16 +809,27 @@ mod tests {
         let root = temp_dir();
         fs::create_dir_all(root.join("nested/ignored")).unwrap();
         fs::create_dir_all(root.join(".hidden")).unwrap();
-        fs::write(root.join(".gitignore"), "nested/ignored/\nignored.md\n").unwrap();
+        fs::write(
+            root.join(".gitignore"),
+            "nested/ignored/\nignored.md\n\\#literal.md\n\\!literal.md\ndraft-[0-9].md\n",
+        )
+        .unwrap();
         fs::write(root.join("README.MARKDOWN"), "ok").unwrap();
         fs::write(root.join("ignored.md"), "no").unwrap();
+        fs::write(root.join("#literal.md"), "no").unwrap();
+        fs::write(root.join("!literal.md"), "no").unwrap();
+        fs::write(root.join("draft-1.md"), "no").unwrap();
+        fs::write(root.join("draft-a.md"), "ok").unwrap();
         fs::write(root.join("nested/keep.md"), "ok").unwrap();
         fs::write(root.join("nested/ignored/no.md"), "no").unwrap();
         fs::write(root.join(".hidden/no.md"), "no").unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(root.join("nested"), root.join("linked")).unwrap();
         let paths = discover_paths(&root).unwrap();
-        assert_eq!(paths, vec!["README.MARKDOWN", "nested/keep.md"]);
+        assert_eq!(
+            paths,
+            vec!["README.MARKDOWN", "draft-a.md", "nested/keep.md"]
+        );
     }
 
     #[test]

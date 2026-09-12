@@ -26,12 +26,17 @@ Status: **integrated feature candidate; release blockers remain in 008**.
   force. `loadFileURL:allowingReadAccessToURL:` limits reads to the canonical
   app-owned web directory; navigation allows only its entrypoint and cancels
   external or other local navigations.
+- Discovery uses pinned `ignore` crate Git semantics for nested `.gitignore`, escaped
+  leading markers, character classes, `**`, and negation while retaining hidden and
+  symlink traversal policy; custom glob parser was deleted.
 - Native bridge exposes a typed queue for action and navigation envelopes. GPUI
   drains actions and renderer navigation requests; `NavigationState` resolves
   anchors, local Markdown, external URLs, and non-Markdown targets, and commits
   local loads only after successful bounded reads. Non-Markdown images open through
   `NSWorkspace`; other regular local files require exact-path confirmation, while
-  directories and executable-mode files are blocked. History/current state remains
+  directories and executable-mode files are blocked. Explicit HTTP(S) links use a
+  dedicated browser-link validator, so localhost links remain valid user navigation
+  while remote-image SSRF policy stays isolated. History/current state remains
   unchanged on failed or stale loads.
 - GPUI render maps search/focus/copy/select-all through `ShellState`;
   copy/select-all require renderer or search-input focus. Startup load failures
@@ -99,11 +104,11 @@ work as unintegrated slices.
 ```text
 cargo fmt --check                         passed
 cargo check --locked                      passed; 1 upstream future-incompat warning
-cargo test --locked                       passed; 87 tests
+cargo test --locked                       passed; 88 tests
 cargo clippy --locked --all-targets -- -D warnings
                                            passed; 1 upstream future-incompat warning
 cd web && bun install --frozen-lockfile    passed; 135 packages
-cd web && bun test tests                   passed; 31 tests
+cd web && bun test tests                   passed; 36 tests
 cd web && bun run build                    passed
 ```
 

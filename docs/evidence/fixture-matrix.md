@@ -16,7 +16,7 @@ Statuses distinguish implementation/tests from required live or release evidence
 | R9 | exact source/code/rendered-copy and document-only selection tests | `code-copy.png`, `source-copy.png`, `rendered-copy-select-all.png` | pass |
 | R10 | literal/case/wrap/highlight tests | `search.png` | pass |
 | N1–N4 | transactional history/anchor/load/watcher/stale tests | `navigation-reload.png`, `history.png`, `picker-history.png` | pass |
-| N5 | block locator, offset, unchanged/affected selection and persistence tests | `reload-position.png`; dedicated live unchanged-selection proof absent | partial |
+| N5 | stable block locator plus exact endpoint/unique-fallback selection tests | GPUI `reload-position.png`; restricted WKWebView cross-node selection reload passes | pass |
 | N6 | delete/reappear/empty/last-good tests | live delete failures/reappearance logged; shared alert shown in `recoverable-error.png` | pass |
 | U1 | defaults/import validation, family selection, persistence, appearance-generation tests | `theme-light.png`, `imported-theme.png`; automated system switch not live-recorded | partial |
 | U2 | atomic preferences, precedence, geometry, locator capture/restore tests | `preferences-appearance.png`, `window-geometry.png`; persisted locator restart not live-recorded | partial |

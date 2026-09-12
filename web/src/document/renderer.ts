@@ -167,7 +167,7 @@ export function slugifyHeading(
     .toLocaleLowerCase()
     .trim()
     .replace(/[^\p{L}\p{N}\s_-]/gu, "")
-    .replace(/[\s_]/g, "-");
+    .replace(/\s/g, "-");
   const slug = base || "section";
   const count = used.get(slug) ?? 0;
   used.set(slug, count + 1);
@@ -186,6 +186,13 @@ function escapeHtml(value: string): string {
 function escapeAttribute(value: string): string {
   return escapeHtml(value.replace(/[\u0000-\u001f\u007f]/g, ""));
 }
+function brokerableResource(value: string): boolean {
+  return (
+    !value.startsWith("//") &&
+    (/^https?:\/\//i.test(value) || !/^[a-z][a-z\d+.-]*:/i.test(value))
+  );
+}
+
 function safeUrl(value: string): string | null {
   const url = value.trim();
   if (
@@ -326,6 +333,8 @@ function fallbackSanitize(input: string, options: SanitizerOptions): string {
             ? value
             : options.resolveResource?.(value, "image");
           if (approved) attrs.push(`src="${escapeAttribute(approved)}"`);
+          else if (brokerableResource(value))
+            attrs.push(`data-mdvr-resource="${escapeAttribute(value)}"`);
           continue;
         }
         if (attribute === "href") {
@@ -357,9 +366,14 @@ export function sanitizeHtml(
       const approved = options.approvedUrls?.has(reference)
         ? reference
         : options.resolveResource?.(reference, "image");
-      return approved
-        ? `${prefix}${quote}${escapeAttribute(approved)}${quote}`
-        : whole.replace(/\bsrc\s*=\s*(?:"[^"]*"|'[^']*')/i, "");
+      if (approved)
+        return `${prefix}${quote}${escapeAttribute(approved)}${quote}`;
+      return whole.replace(
+        /\bsrc\s*=\s*(?:"[^"]*"|'[^']*')/i,
+        brokerableResource(reference)
+          ? `data-mdvr-resource="${escapeAttribute(reference)}"`
+          : "",
+      );
     },
   );
   const fragment = DOMPurify.sanitize(routed, {
@@ -435,6 +449,36 @@ const MATH_END = "\uE001";
 function mathMarker(index: number): string {
   return `${MATH_START}${index}${MATH_END}`;
 }
+function protectInlineCode(line: string): { source: string; spans: string[] } {
+  const spans: string[] = [];
+  let source = "";
+  let cursor = 0;
+  while (cursor < line.length) {
+    const start = line.indexOf("`", cursor);
+    if (start < 0) break;
+    let ticks = 1;
+    while (line[start + ticks] === "`") ticks += 1;
+    const delimiter = "`".repeat(ticks);
+    let end = line.indexOf(delimiter, start + ticks);
+    while (end >= 0 && (line[end - 1] === "`" || line[end + ticks] === "`"))
+      end = line.indexOf(delimiter, end + ticks);
+    if (end < 0) break;
+    source += line.slice(cursor, start);
+    const index = spans.push(line.slice(start, end + ticks)) - 1;
+    source += `\uE000MDVR_CODE_${index}\uE001`;
+    cursor = end + ticks;
+  }
+  source += line.slice(cursor);
+  return { source, spans };
+}
+
+function restoreInlineCode(source: string, spans: string[]): string {
+  return source.replace(
+    /\uE000MDVR_CODE_(\d+)\uE001/g,
+    (_whole, index) => spans[Number(index)] ?? "",
+  );
+}
+
 function protectMath(source: string): {
   source: string;
   parts: MathPart[];
@@ -471,7 +515,8 @@ function protectMath(source: string): {
       output.push(mathMarker(index));
       continue;
     }
-    const replaced = line.replace(
+    const code = protectInlineCode(line);
+    const replaced = code.source.replace(
       /\$\$([^$\n]+)\$\$|(?<!\\)\$([^$\n]+)(?<!\\)\$/g,
       (_whole, display, inline) => {
         const index =
@@ -487,7 +532,7 @@ function protectMath(source: string): {
       (replaced.match(/(?<!\\)(?<!\$)\$(?!\$)/g) ?? []).length % 2
     )
       malformed = true;
-    output.push(replaced);
+    output.push(restoreInlineCode(replaced, code.spans));
   }
   return { source: output.join("\n"), parts, malformed };
 }
@@ -811,10 +856,14 @@ export function renderDocument(
   const codeByToken = new Map<object, CodeBlock>();
   const diagramByToken = new Map<object, string>();
   const counts = new Map<string, number>();
-  const nextId = (prefix: string): string => {
-    const count = (counts.get(prefix) ?? 0) + 1;
-    counts.set(prefix, count);
-    return `${prefix}-${count}`;
+  const nextId = (prefix: string, text: string): string => {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < text.length; index += 1)
+      hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193);
+    const base = `${prefix}-${(hash >>> 0).toString(36)}`;
+    const count = counts.get(base) ?? 0;
+    counts.set(base, count + 1);
+    return count ? `${base}-${count}` : base;
   };
   const starts = new Set([
     "heading_open",
@@ -846,8 +895,6 @@ export function renderDocument(
               : token.type === "footnote_block_open"
                 ? "footnotes"
                 : token.type.replace("_open", "");
-    const id = nextId(prefix);
-    idByToken.set(token, id);
     let end = i;
     if (token.nesting === 1) {
       let depth = 0;
@@ -885,6 +932,8 @@ export function renderDocument(
       text =
         prepared.parts[Number(tokens[i + 1]!.content.match(/\d+/)![0])]!.source;
     }
+    const id = nextId(prefix, text);
+    idByToken.set(token, id);
     if (token.type === "heading_open") {
       const raw = tokenText(tokens, i, end);
       const headingId = slugifyHeading(raw, usedSlugs);
@@ -1117,18 +1166,19 @@ export function preserveSelection(
       endBlockId: previous.startBlockId,
       endOffset: previous.startOffset + previous.text.length,
     };
-  for (const block of next.blocks) {
+  const matches = next.blocks.flatMap((block) => {
     const index = block.text.indexOf(previous.text);
-    if (index >= 0)
-      return {
-        startBlockId: block.id,
-        startOffset: index,
-        endBlockId: block.id,
-        endOffset: index + previous.text.length,
-        text: previous.text,
-      };
-  }
-  return null;
+    return index < 0 ? [] : [{ block, index }];
+  });
+  if (matches.length !== 1) return null;
+  const [{ block, index }] = matches;
+  return {
+    startBlockId: block.id,
+    startOffset: index,
+    endBlockId: block.id,
+    endOffset: index + previous.text.length,
+    text: previous.text,
+  };
 }
 
 export class GenerationGate {
