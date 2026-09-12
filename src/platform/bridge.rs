@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use crate::contracts::{
     ActionMessage, ActionMessageEnvelope, ContractError, DocumentId, Generation, Message,
-    NavigationRequest, RenderError, RenderReady, ResourceRequest, decode,
+    NavigationRequest, PositionCaptured, RenderError, RenderReady, ResourceRequest, decode,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -39,6 +39,7 @@ pub(crate) enum BridgeMessage {
     Action(ActionMessageEnvelope),
     Navigation(NavigationRequest),
     Resource(ResourceRequest),
+    PositionCaptured(PositionCaptured),
     RenderReady(RenderReady),
     RenderError(RenderError),
 }
@@ -82,6 +83,19 @@ impl BridgeRouter {
                     });
                 }
                 BridgeMessage::Navigation(request)
+            }
+            Message::PositionCaptured(position) => {
+                let actual = BridgeContext {
+                    document: Some(position.document),
+                    generation: Some(position.generation),
+                };
+                if actual != self.context {
+                    return Err(BridgeError::StaleContext {
+                        expected: self.context,
+                        actual,
+                    });
+                }
+                BridgeMessage::PositionCaptured(position)
             }
             Message::RenderReady(ready) => {
                 let actual = BridgeContext {
@@ -130,7 +144,10 @@ impl BridgeRouter {
     }
 
     pub(crate) fn set_context(&mut self, context: BridgeContext) {
-        self.context = context;
+        if context != self.context {
+            self.queue.clear();
+            self.context = context;
+        }
     }
 
     pub(crate) fn drain(&mut self) -> Vec<BridgeMessage> {
@@ -144,6 +161,7 @@ impl BridgeRouter {
                 BridgeMessage::Action(action) => Some(action),
                 BridgeMessage::Navigation(_)
                 | BridgeMessage::Resource(_)
+                | BridgeMessage::PositionCaptured(_)
                 | BridgeMessage::RenderReady(_)
                 | BridgeMessage::RenderError(_) => None,
             })
@@ -156,6 +174,7 @@ impl BridgeRouter {
             .filter_map(|message| match message {
                 BridgeMessage::Action(_)
                 | BridgeMessage::Resource(_)
+                | BridgeMessage::PositionCaptured(_)
                 | BridgeMessage::RenderReady(_)
                 | BridgeMessage::RenderError(_) => None,
                 BridgeMessage::Navigation(request) => Some(request),
@@ -183,8 +202,8 @@ fn is_supported(action: &ActionMessage) -> bool {
 mod tests {
     use super::*;
     use crate::contracts::{
-        ActionMessage, CopyAction, Envelope, FocusOwner, RequestId, ResourceId, ResourceKind,
-        ResourceReference, SearchAction, encode,
+        ActionMessage, CopyAction, Envelope, FocusOwner, Locator, LocatorFallback, RequestId,
+        ResourceId, ResourceKind, ResourceReference, SearchAction, encode,
     };
 
     fn id(value: u64) -> RequestId {
@@ -249,6 +268,33 @@ mod tests {
             .accept(&encode(&Envelope::new(Message::ResourceRequest(request.clone()))).unwrap())
             .unwrap();
         assert_eq!(router.drain(), vec![BridgeMessage::Resource(request)]);
+    }
+
+    #[test]
+    fn accepts_current_position_capture() {
+        let context = BridgeContext {
+            document: DocumentId::new(4),
+            generation: Generation::new(7),
+        };
+        let position = PositionCaptured {
+            request: id(3),
+            document: context.document.unwrap(),
+            generation: context.generation.unwrap(),
+            locator: Locator {
+                heading: Some("intro".into()),
+                block: "p-3".into(),
+                offset: 12,
+                fallback: LocatorFallback::NearestHeading,
+            },
+        };
+        let mut router = BridgeRouter::new(context);
+        router
+            .accept(&encode(&Envelope::new(Message::PositionCaptured(position.clone()))).unwrap())
+            .unwrap();
+        assert_eq!(
+            router.drain(),
+            vec![BridgeMessage::PositionCaptured(position)]
+        );
     }
 
     #[test]
@@ -340,6 +386,7 @@ mod tests {
                 BridgeMessage::Action(action) => action.request.get(),
                 BridgeMessage::Navigation(request) => request.request.get(),
                 BridgeMessage::Resource(request) => request.request.get(),
+                BridgeMessage::PositionCaptured(position) => position.request.get(),
                 BridgeMessage::RenderReady(_) | BridgeMessage::RenderError(_) => 0,
             })
             .collect::<Vec<_>>();
@@ -369,8 +416,7 @@ mod tests {
         };
         router.set_context(next);
 
-        let queued = router.drain_actions();
-        assert_eq!(queued.len(), 1);
+        assert!(router.drain_actions().is_empty());
         assert_eq!(
             router.accept(&bytes_with_generation(
                 2,

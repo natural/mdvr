@@ -17,9 +17,9 @@ use gpui::{
 use crate::{
     LaunchPlan,
     contracts::{
-        ActionMessage, ActionMessageEnvelope, ErrorCode, Generation, NavigationRequest,
-        NavigationTarget, ResourceKind, ResourceReference, ResourceRequest, ResourceResult,
-        ResourceResultValue, RootId, ScanId, SearchAction,
+        ActionMessage, ActionMessageEnvelope, ErrorCode, Generation, LocatorFallback,
+        NavigationRequest, NavigationTarget, ResourceKind, ResourceReference, ResourceRequest,
+        ResourceResult, ResourceResultValue, RootId, ScanId, SearchAction,
     },
     files::{
         DiscoveryEvent, DiscoveryScanner, LARGE_SOURCE_CONFIRM_BYTES, LoadError, LoadedSource,
@@ -38,8 +38,8 @@ use crate::{
         update_bridge_context,
     },
     preferences::{
-        DisplayBounds, LaunchIntent, Preferences, WindowGeometry, conventional_path,
-        load_or_default, resolve_launch, save,
+        DisplayBounds, LaunchIntent, Preferences, ReadingLocator, WindowGeometry,
+        conventional_path, load_or_default, resolve_launch, save,
     },
     theme::{AppearanceMode, ThemeFamily, default_theme, import_file},
     ui::{FocusOwner, ShellCommand, ShellState},
@@ -109,6 +109,31 @@ fn resource_mime(reference: &str) -> Option<String> {
         }
         .to_owned(),
     )
+}
+
+fn preference_locator(locator: &Locator) -> ReadingLocator {
+    ReadingLocator {
+        heading: locator.heading.clone(),
+        block: locator.block.clone(),
+        offset: locator.offset,
+    }
+}
+
+fn contract_locator(locator: &Locator) -> crate::contracts::Locator {
+    crate::contracts::Locator {
+        heading: locator.heading.clone(),
+        block: locator.block.clone(),
+        offset: locator.offset,
+        fallback: LocatorFallback::NearestHeading,
+    }
+}
+
+fn navigation_locator(locator: &ReadingLocator) -> Locator {
+    Locator {
+        heading: locator.heading.clone(),
+        block: locator.block.clone(),
+        offset: locator.offset,
+    }
 }
 
 fn action_context(action: &ActionMessageEnvelope) -> BridgeContext {
@@ -207,6 +232,7 @@ struct MdvrView {
     picker_focus: FocusHandle,
     pending_open: VecDeque<PathBuf>,
     pending_large: Option<(PathBuf, usize)>,
+    pending_initial_locator: Option<ReadingLocator>,
     startup_error: Option<String>,
     theme_family: Option<ThemeFamily>,
     render_started: Option<Instant>,
@@ -246,6 +272,7 @@ impl MdvrView {
             picker_focus,
             pending_open: VecDeque::new(),
             pending_large: None,
+            pending_initial_locator: None,
             startup_error: None,
             theme_family: None,
             render_started: None,
@@ -270,6 +297,7 @@ impl MdvrView {
             .map(|path| load_or_default(&path).preferences)
             .unwrap_or_default();
         self.shell.text_scale_percent = self.preferences.text_scale_percent;
+        self.pending_initial_locator = launch.state.reading_locator.clone();
         self.theme_family = self
             .preferences
             .theme_file
@@ -427,6 +455,15 @@ impl MdvrView {
             document: Some(current.document),
             generation: Some(current.generation),
         });
+        if let Some(locator) = self.pending_initial_locator.take() {
+            let locator = navigation_locator(&locator);
+            self.navigation.set_current_locator(locator.clone());
+            if let (Some(web_view), Some(current)) =
+                (self.web_view.as_mut(), self.navigation.current())
+            {
+                let _ = web_view.restore_locator(contract_locator(&locator), current.generation);
+            }
+        }
         self.appearance_mode = None;
         self.update_appearance(window);
         self.save_preferences();
@@ -719,6 +756,24 @@ impl MdvrView {
                 }
                 BridgeMessage::Navigation(request) => self.dispatch_navigation(request, cx),
                 BridgeMessage::Resource(request) => self.dispatch_resource(request),
+                BridgeMessage::PositionCaptured(position) => {
+                    if Some(position.document) != self.bridge_context.document
+                        || Some(position.generation) != self.bridge_context.generation
+                    {
+                        continue;
+                    }
+                    let locator = Locator {
+                        heading: position.locator.heading,
+                        block: position.locator.block,
+                        offset: position.locator.offset,
+                    };
+                    self.navigation.set_current_locator(locator.clone());
+                    let preference = preference_locator(&locator);
+                    if self.preferences.reading_locator.as_ref() != Some(&preference) {
+                        self.preferences.reading_locator = Some(preference);
+                        self.save_preferences();
+                    }
+                }
                 BridgeMessage::RenderReady(ready) => {
                     if let Some(started) = self.render_started.take() {
                         eprintln!(
@@ -896,10 +951,11 @@ impl MdvrView {
             eprintln!("mdvr: ignored stale renderer navigation request");
             return;
         }
+        let locator = current.locator.clone();
         let target = navigation_target_text(&request.target);
         match self
             .navigation
-            .request_navigation_from(&target, request.generation, Locator::start())
+            .request_navigation_from(&target, request.generation, locator)
         {
             Ok(NavigationAction::Anchor { anchor, .. }) => {
                 if let Some(web_view) = self.web_view.as_ref()
@@ -974,11 +1030,19 @@ impl MdvrView {
         let Some(current) = self.navigation.current() else {
             return;
         };
-        self.shell.current_document = Some(current.path.clone());
+        let path = current.path.clone();
+        let generation = current.generation;
+        let locator = contract_locator(&current.locator);
+        self.shell.current_document = Some(path);
         self.document_committed(BridgeContext {
             document: Some(document),
-            generation: Some(current.generation),
+            generation: Some(generation),
         });
+        if let Some(web_view) = self.web_view.as_mut()
+            && let Err(error) = web_view.restore_locator(locator, generation)
+        {
+            eprintln!("mdvr: cannot restore reading position: {error}");
+        }
         self.save_preferences();
     }
 
@@ -1009,13 +1073,21 @@ impl MdvrView {
     }
 
     fn go_back(&mut self, cx: &mut Context<Self>) {
-        if let Ok(Some(request)) = self.navigation.go_back(Locator::start()) {
+        let locator = self
+            .navigation
+            .current()
+            .map_or_else(Locator::start, |current| current.locator.clone());
+        if let Ok(Some(request)) = self.navigation.go_back(locator) {
             self.load_navigation(request, cx);
         }
     }
 
     fn go_forward(&mut self, cx: &mut Context<Self>) {
-        if let Ok(Some(request)) = self.navigation.go_forward(Locator::start()) {
+        let locator = self
+            .navigation
+            .current()
+            .map_or_else(Locator::start, |current| current.locator.clone());
+        if let Ok(Some(request)) = self.navigation.go_forward(locator) {
             self.load_navigation(request, cx);
         }
     }

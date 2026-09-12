@@ -266,6 +266,15 @@ impl NavigationState {
         )))
     }
 
+    pub fn set_current_locator(&mut self, locator: Locator) {
+        if let Some(current) = self.current.as_mut() {
+            current.locator = locator.clone();
+        }
+        if let Some(entry) = self.cursor.and_then(|cursor| self.history.get_mut(cursor)) {
+            entry.locator = locator;
+        }
+    }
+
     pub fn reload(&mut self) -> Result<LoadRequest, NavigationFailure> {
         let (path, anchor, locator) = {
             let current = self
@@ -595,6 +604,21 @@ mod tests {
         state.commit_load(request, second).unwrap();
         assert!(!state.can_go_forward());
         assert_eq!(state.history().len(), 2);
+    }
+
+    #[test]
+    fn captured_locator_updates_current_document_and_history() {
+        let source = load_source(&fixture("reload/before.md"), false).unwrap();
+        let mut state = NavigationState::new(fixture(""));
+        state.open_initial(source);
+        let locator = Locator {
+            heading: Some("stable-heading".into()),
+            block: "p-4".into(),
+            offset: 17,
+        };
+        state.set_current_locator(locator.clone());
+        assert_eq!(state.current().unwrap().locator, locator);
+        assert_eq!(state.history()[0].locator, locator);
     }
 
     #[test]

@@ -85,7 +85,10 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   Evidence: [outline](screenshots/outline.png).
 - Reload captures first visible stable block plus viewport offset and exact
   selection text before DOM replacement, restores matching block offset, and
-  recreates unchanged selection across text nodes without moving focus. Live
+  recreates unchanged selection across text nodes without moving focus. Renderer
+  scroll/navigation now also emits closed generation-bound locators; native state
+  updates current history and atomically persists them, while Dock startup,
+  back/forward, and reload restore only after matching source mount. Live
   document stayed at paragraphs 26–Target after editing paragraph 0 and reload.
   Evidence: [reload position](screenshots/reload-position.png). Unchanged-selection
   restoration retains source regression coverage; dedicated live selection proof remains open.
@@ -176,7 +179,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   [rendered copy and select all](screenshots/rendered-copy-select-all.png).
 - Renderer posts closed `render.ready` only after synchronous DOM mount; native
   bridge rejects stale document/generation and records commit-to-ready latency.
-- Latest local verification passed 81 Rust tests/clippy, 29 web tests/build,
+- Latest local verification passed 83 Rust tests/clippy, 30 web tests/build,
   restricted-file WKWebView probe, current release build, app inspection, and DMG
   inspection.
 

@@ -23,7 +23,7 @@ use std::{
 
 use crate::{
     contracts::{
-        Appearance, AppearanceUpdate, ContractError, DocumentId, Envelope, Generation,
+        Appearance, AppearanceUpdate, ContractError, DocumentId, Envelope, Generation, Locator,
         MAX_FRAME_BYTES, Message, ResourceResult, decode, encode,
     },
     platform::bridge::{BridgeContext, BridgeMessage, BridgeRouter},
@@ -533,12 +533,19 @@ struct PendingContext {
     context: BridgeContext,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct PendingLocator {
+    locator: Locator,
+    generation: Generation,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 struct PendingPage {
     source: Option<PendingSource>,
     appearance: Option<PendingAppearance>,
     context: Option<PendingContext>,
     theme_choices: Option<String>,
+    locator: Option<PendingLocator>,
 }
 
 #[derive(Default)]
@@ -550,6 +557,7 @@ struct PendingPageState {
     appearance: Option<PendingAppearance>,
     context: Option<PendingContext>,
     theme_choices: Option<String>,
+    locator: Option<PendingLocator>,
 }
 
 impl PendingPageState {
@@ -561,6 +569,7 @@ impl PendingPageState {
         self.appearance = None;
         self.context = None;
         self.theme_choices = None;
+        self.locator = None;
     }
 
     fn page_ready(&self) -> bool {
@@ -583,6 +592,13 @@ impl PendingPageState {
             .is_some_and(|pending| pending.generation.get() < generation.get())
         {
             self.appearance = None;
+        }
+        if self
+            .locator
+            .as_ref()
+            .is_some_and(|pending| pending.generation.get() < generation.get())
+        {
+            self.locator = None;
         }
     }
 
@@ -615,6 +631,20 @@ impl PendingPageState {
         true
     }
 
+    fn replace_locator(&mut self, locator: Locator, generation: Generation) -> bool {
+        if self
+            .latest_source_generation
+            .is_some_and(|source| generation.get() < source.get())
+        {
+            return false;
+        }
+        self.locator = Some(PendingLocator {
+            locator,
+            generation,
+        });
+        true
+    }
+
     fn replace_appearance(&mut self, appearance: Appearance, generation: Generation) -> bool {
         if self
             .latest_source_generation
@@ -640,6 +670,7 @@ impl PendingPageState {
             appearance: self.appearance.take(),
             context: self.context.take(),
             theme_choices: self.theme_choices.take(),
+            locator: self.locator.take(),
         }
     }
 
@@ -664,6 +695,12 @@ impl PendingPageState {
             match document_load_script(&source.source, source.generation) {
                 Ok(script) => evaluate_javascript(web_view, &script),
                 Err(error) => eprintln!("mdvr: cannot apply pending source: {error}"),
+            }
+        }
+        if let Some(locator) = pending.locator {
+            match locator_script(&locator.locator) {
+                Ok(script) => evaluate_javascript(web_view, &script),
+                Err(error) => eprintln!("mdvr: cannot apply pending locator: {error}"),
             }
         }
     }
@@ -747,6 +784,13 @@ fn anchor_script(anchor: &str) -> Result<String, serde_json::Error> {
     Ok(format!(
         "window.mdvrNavigateAnchor({});",
         serde_json::to_string(anchor)?
+    ))
+}
+
+fn locator_script(locator: &Locator) -> Result<String, serde_json::Error> {
+    Ok(format!(
+        "window.mdvrRestoreLocator({});",
+        serde_json::to_string(locator)?
     ))
 }
 
@@ -966,6 +1010,21 @@ impl EmbeddedWebView {
         Ok(())
     }
 
+    pub fn restore_locator(
+        &mut self,
+        locator: Locator,
+        generation: Generation,
+    ) -> Result<(), serde_json::Error> {
+        assert!(main_thread(), "WKWebView must be used on main thread");
+        let script = locator_script(&locator)?;
+        if self.pending_state.page_ready() {
+            evaluate_javascript(self.view, &script);
+        } else {
+            self.pending_state.replace_locator(locator, generation);
+        }
+        Ok(())
+    }
+
     pub fn set_theme_choices(&mut self, names: &[String], selected: Option<&str>) {
         assert!(main_thread(), "WKWebView must be used on main thread");
         let names = serde_json::to_string(names).expect("theme names serialize");
@@ -1092,8 +1151,17 @@ mod tests {
         assert!(state.replace_source("old".into(), first));
         assert!(state.replace_source("new".into(), second));
         assert!(!state.replace_source("stale".into(), first));
+        let locator = Locator {
+            heading: Some("intro".into()),
+            block: "p-2".into(),
+            offset: 9,
+            fallback: crate::contracts::LocatorFallback::NearestHeading,
+        };
+        assert!(state.replace_locator(locator.clone(), second));
         assert!(!state.page_ready());
-        assert_eq!(state.take_pending().source.unwrap().source, "new");
+        let pending = state.take_pending();
+        assert_eq!(pending.source.unwrap().source, "new");
+        assert_eq!(pending.locator.unwrap().locator, locator);
         assert!(state.page_ready());
         assert_eq!(state.take_pending(), PendingPage::default());
         assert!(!state.replace_source("duplicate".into(), second));

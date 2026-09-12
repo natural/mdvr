@@ -1,6 +1,6 @@
 # 007 integration evidence — native composition slice
 
-Status: **bridge dispatch slice implemented; M2 not passed**.
+Status: **integrated feature candidate; release blockers remain in 008**.
 
 ## Implemented
 
@@ -33,7 +33,11 @@ Status: **bridge dispatch slice implemented; M2 not passed**.
   copy/select-all require renderer or search-input focus.
 - Bridge context updates on document commit. Queue actions are checked again at
   dispatch, so queued actions from prior document/generation are rejected.
-  No bridge action grants path or filesystem authority.
+  Renderer scroll/navigation emits validated generation-bound reading locators;
+  native state updates current history and atomically persists the latest locator.
+  Dock restoration, reload, and back/forward apply it only after matching source
+  mount, with block/heading/start/end fallback. No bridge action grants path or
+  filesystem authority.
 - Native appearance propagation validates contract revision-1 `Appearance`
   tokens before JSON encoding `window.mdvrApplyAppearance(...)`. Document
   generations reject stale appearance updates while allowing repeated updates
@@ -88,15 +92,13 @@ work as unintegrated slices.
 ```text
 cargo fmt --check                         passed
 cargo check --locked                      passed; 1 upstream future-incompat warning
-cargo test --locked                       passed; 70 tests
+cargo test --locked                       passed; 83 tests
 cargo clippy --locked --all-targets -- -D warnings
                                            passed; 1 upstream future-incompat warning
 cd web && bun install --frozen-lockfile    passed; 135 packages
-cd web && bun test                         passed; 15 tests
+cd web && bun test tests                   passed; 30 tests
 cd web && bun run build                    passed
 ```
 
-Desktop runtime observation remains pending. The source-level asset-loading and
-page-readiness race is covered by implementation paths, but visible WebKit
-rendering, click navigation, history, and reload behavior still require runtime
-evidence.
+Current live interaction evidence and remaining blockers are tracked in
+`008-acceptance.md`.

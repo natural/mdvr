@@ -45,6 +45,13 @@ test("GIF resources are frozen to first PNG frame", () => {
   expect(main).toContain('canvas.toBlob(resolve, "image/png")');
 });
 
+test("reading locators are captured and restored through closed bridge messages", () => {
+  expect(html).toContain("kind: 'position.captured'");
+  expect(html).toContain("fallback: 'nearest_heading'");
+  expect(html).toContain("window.mdvrRestoreLocator");
+  expect(html).toContain("setTimeout(postPosition, 250)");
+});
+
 test("images use context-bound native resource requests", () => {
   expect(html).toContain("kind: 'resource.request'");
   expect(html).toContain("{ remote_url: { value: reference } }");
