@@ -102,7 +102,14 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   Return opened `image.md`. Clicking the picker then typing `ban` changed the visible
   query and reduced three entries to `banana.md`. Evidence:
   [keyboard open](screenshots/picker-keyboard-open.png),
-  [picker filter](screenshots/picker-filter.png).
+  [picker filter](screenshots/picker-filter.png). ⌘P now retains the current
+  navigation/document state while showing the picker; Escape recreated the embedded
+  viewer and restored the same `design.md` document rather than discarding it.
+  Evidence: [picker over document](screenshots/picker-return-open.png),
+  [picker Escape return](screenshots/picker-return-document.png). Selecting
+  `docs/design.md` from that picker preserved prior `readme.md` as enabled Back
+  history even though WKWebView was recreated; readiness queuing retained control
+  state. Evidence: [picker history](screenshots/picker-history.png).
   While picker remains open, one-second background rescans atomically replace its
   entries while retaining selected path when present. Live removal of `a.md` and
   addition of `c.md` produced `b.md`/`c.md` without blocking. Evidence:

@@ -234,6 +234,7 @@ struct MdvrView {
     pending_large: Option<(PathBuf, usize)>,
     pending_initial_locator: Option<ReadingLocator>,
     failed_path: Option<PathBuf>,
+    picker_return: bool,
     startup_error: Option<String>,
     theme_family: Option<ThemeFamily>,
     render_started: Option<Instant>,
@@ -275,6 +276,7 @@ impl MdvrView {
             pending_large: None,
             pending_initial_locator: None,
             failed_path: None,
+            picker_return: false,
             startup_error: None,
             theme_family: None,
             render_started: None,
@@ -416,6 +418,10 @@ impl MdvrView {
                 query.pop();
                 self.shell.picker.set_query(query);
             }
+            "escape" if self.picker_return => {
+                self.restore_current_document(window, cx);
+                return;
+            }
             "escape" => self.shell.picker.set_query(""),
             _ => {
                 let Some(text) = event.keystroke.key_char.as_deref().filter(|text| {
@@ -453,6 +459,7 @@ impl MdvrView {
         self.navigation.open_initial(source.clone());
         self.shell.current_document = Some(path.clone());
         self.failed_path = None;
+        self.picker_return = false;
         self.startup_error = None;
         self.web_view = Some(web_view);
         self.watch_document(path, Some(source), cx);
@@ -508,10 +515,26 @@ impl MdvrView {
     }
 
     fn open_picker_document(&mut self, relative: String, window: &Window, cx: &mut Context<Self>) {
-        let Some(root) = self.shell.root.as_deref() else {
+        let Some(root) = self.shell.root.clone() else {
             return;
         };
         let path = root.join(relative);
+        if self.picker_return {
+            self.restore_current_document(window, cx);
+            let Some(current) = self.navigation.current() else {
+                return;
+            };
+            match self.navigation.request_navigation_from(
+                &path.to_string_lossy(),
+                current.generation,
+                current.locator.clone(),
+            ) {
+                Ok(NavigationAction::Load(request)) => self.load_navigation(request, cx),
+                Ok(_) => {}
+                Err(error) => self.report_error(format!("Cannot open {}: {error}", path.display())),
+            }
+            return;
+        }
         match load_source(&path, false) {
             Ok(source) => self.attach_initial_source(source, window, cx),
             Err(LoadError::NeedsConfirmation { path, bytes }) => {
@@ -754,9 +777,7 @@ impl MdvrView {
                                 }
                             }
                             ActionMessage::Open(crate::contracts::OpenAction::Picker) => {
-                                if let Some(root) = self.shell.root.clone() {
-                                    self.open_directory(root, cx);
-                                }
+                                self.open_document_picker(cx)
                             }
                             ActionMessage::History(crate::contracts::HistoryAction::Back) => {
                                 self.go_back(cx)
@@ -811,6 +832,63 @@ impl MdvrView {
         }
     }
 
+    fn open_document_picker(&mut self, cx: &mut Context<Self>) {
+        if self.navigation.current().is_none() || self.shell.root.is_none() {
+            return;
+        }
+        if let Some(stop) = self.reload_stop.take() {
+            stop.store(true, std::sync::atomic::Ordering::Release);
+        }
+        self.reload_task = None;
+        self.web_view = None;
+        self.shell.picker = Default::default();
+        self.picker_return = true;
+        self.start_discovery(cx);
+        cx.notify();
+    }
+
+    fn restore_current_document(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let Some(current) = self.navigation.current().cloned() else {
+            return;
+        };
+        let Some(mut web_view) = EmbeddedWebView::attach(window) else {
+            self.report_error("WKWebView attachment failed".into());
+            return;
+        };
+        let _ = web_view.load_initial_document();
+        if web_view
+            .load_document_source(&current.source, current.generation)
+            .is_err()
+        {
+            self.report_error(format!("Cannot restore {}", current.path.display()));
+            return;
+        }
+        self.web_view = Some(web_view);
+        self.picker_return = false;
+        self.discovery_task = None;
+        self.document_committed(BridgeContext {
+            document: Some(current.document),
+            generation: Some(current.generation),
+        });
+        if let Some(web_view) = self.web_view.as_mut() {
+            let _ =
+                web_view.restore_locator(contract_locator(&current.locator), current.generation);
+            let _ = web_view.focus();
+        }
+        self.watch_document(
+            current.path.clone(),
+            Some(LoadedSource {
+                path: current.path,
+                bytes: current.source.len(),
+                source: current.source,
+            }),
+            cx,
+        );
+        self.appearance_mode = None;
+        self.update_appearance(window);
+        cx.notify();
+    }
+
     fn open_directory(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if let Some(stop) = self.reload_stop.take() {
             stop.store(true, std::sync::atomic::Ordering::Release);
@@ -822,6 +900,7 @@ impl MdvrView {
         self.shell.current_document = None;
         self.shell.picker = Default::default();
         self.failed_path = None;
+        self.picker_return = false;
         self.startup_error = None;
         self.document_committed(BridgeContext::default());
         self.start_discovery(cx);

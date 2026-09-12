@@ -545,6 +545,7 @@ struct PendingPage {
     appearance: Option<PendingAppearance>,
     context: Option<PendingContext>,
     theme_choices: Option<String>,
+    history: Option<String>,
     locator: Option<PendingLocator>,
 }
 
@@ -557,6 +558,7 @@ struct PendingPageState {
     appearance: Option<PendingAppearance>,
     context: Option<PendingContext>,
     theme_choices: Option<String>,
+    history: Option<String>,
     locator: Option<PendingLocator>,
 }
 
@@ -569,6 +571,7 @@ impl PendingPageState {
         self.appearance = None;
         self.context = None;
         self.theme_choices = None;
+        self.history = None;
         self.locator = None;
     }
 
@@ -670,6 +673,7 @@ impl PendingPageState {
             appearance: self.appearance.take(),
             context: self.context.take(),
             theme_choices: self.theme_choices.take(),
+            history: self.history.take(),
             locator: self.locator.take(),
         }
     }
@@ -683,6 +687,9 @@ impl PendingPageState {
             );
         }
         if let Some(script) = pending.theme_choices {
+            evaluate_javascript(web_view, &script);
+        }
+        if let Some(script) = pending.history {
             evaluate_javascript(web_view, &script);
         }
         if let Some(appearance) = pending.appearance {
@@ -1052,13 +1059,13 @@ impl EmbeddedWebView {
         }
     }
 
-    pub fn set_history_availability(&self, back: bool, forward: bool) {
+    pub fn set_history_availability(&mut self, back: bool, forward: bool) {
         assert!(main_thread(), "WKWebView must be used on main thread");
+        let script = format!("window.mdvrSetHistoryAvailability({back}, {forward});");
         if self.pending_state.page_ready() {
-            evaluate_javascript(
-                self.view,
-                &format!("window.mdvrSetHistoryAvailability({back}, {forward});"),
-            );
+            evaluate_javascript(self.view, &script);
+        } else {
+            self.pending_state.history = Some(script);
         }
     }
 
@@ -1173,10 +1180,12 @@ mod tests {
             fallback: crate::contracts::LocatorFallback::NearestHeading,
         };
         assert!(state.replace_locator(locator.clone(), second));
+        state.history = Some("history".into());
         assert!(!state.page_ready());
         let pending = state.take_pending();
         assert_eq!(pending.source.unwrap().source, "new");
         assert_eq!(pending.locator.unwrap().locator, locator);
+        assert_eq!(pending.history.as_deref(), Some("history"));
         assert!(state.page_ready());
         assert_eq!(state.take_pending(), PendingPage::default());
         assert!(!state.replace_source("duplicate".into(), second));
