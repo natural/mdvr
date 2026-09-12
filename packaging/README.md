@@ -1,7 +1,7 @@
 # macOS packaging scaffolding
 
-Scripts here build and inspect one unsigned, arm64-only `.app`. They do not
-build Rust or web inputs, sign, notarize, create a DMG, install anything, or
+Scripts here build and inspect one unsigned, arm64-only `.app` and compressed
+DMG. They do not build Rust or web inputs, sign, notarize, install anything, or
 modify `PATH`.
 
 ## Exact commands
@@ -16,7 +16,9 @@ cd ..
 cargo build --release --locked
 sh packaging/build-app.sh
 sh scripts/verify/check-packaging.sh
-open packaging/build/mdvr.app
+sh packaging/build-dmg.sh
+sh scripts/verify/check-dmg.sh
+open packaging/build/mdvr.dmg
 ```
 
 Safe prerequisite check without writing the bundle:
@@ -42,6 +44,8 @@ or non-arm64 binaries and web-asset symlinks. It replaces only
 of custom URL schemes, bundled web assets, symlinks, and every embedded Mach-O
 file with `file`, `lipo`, and `otool -L`. Current bundle has no embedded
 frameworks; linked system frameworks are printed for inspection.
+`build-dmg.sh` creates a compressed HFS+ image; `check-dmg.sh` mounts it read-only
+and reruns full app inspection before detaching.
 
 ## Design limits and blockers
 
@@ -55,8 +59,8 @@ frameworks; linked system frameworks are printed for inspection.
 - Current release artifact is arm64-only. No x86_64 target or universal binary
   is claimed.
 - Bundle is unsigned and unnotarized. Developer credentials, hardened-runtime
-  settings, notarization, stapling, Gatekeeper, DMG creation, clean-machine
-  launch, and Intel launch remain release blockers.
+  settings, notarization, stapling, Gatekeeper, clean-machine launch, and Intel
+  launch remain release blockers.
 - `LSMinimumSystemVersion` is omitted until pinned dependency and WebKit minimum
   support is resolved; no deployment target is claimed.
 - Native code resolves production assets from `Contents/Resources/web` in the
