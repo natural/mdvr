@@ -151,7 +151,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   starts progressive picker for new root; file choice queues transactional open.
   Native folder-only dialog opened live. Evidence:
   [open controls](screenshots/open-controls.png).
-- Latest checkpoint verified debug build, 78 Rust tests/clippy and 27 web tests/build.
+- ⇧⌘P opens keyboard-focused command palette with native open/picker, copy,
+  outline, and theme actions; Escape restores renderer focus. Plain ⌘P returns to
+  current-root picker. Live palette exposed all fixed actions. Evidence:
+  [command palette](screenshots/command-palette.png).
+- Latest checkpoint verified debug build, 78 Rust tests/clippy and 28 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 

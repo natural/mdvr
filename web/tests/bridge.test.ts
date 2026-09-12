@@ -52,6 +52,15 @@ test("local images use context-bound native resource requests", () => {
   expect(html).toContain("URL.revokeObjectURL(url)");
 });
 
+test("command palette is keyboard accessible and authority-free", () => {
+  expect(html).toContain('aria-label="Command palette"');
+  expect(html).toContain("if (event.shiftKey) openPalette()");
+  expect(html).toContain("palette.querySelector('button').focus()");
+  expect(html).toContain(
+    "postNativeAction({ kind: 'focus', payload: 'renderer' })",
+  );
+});
+
 test("open controls request native file and folder pickers", () => {
   expect(html).toContain('data-open="file"');
   expect(html).toContain('data-open="folder"');

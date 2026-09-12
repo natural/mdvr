@@ -19,6 +19,9 @@
       #outline { position: fixed; z-index: 2; left: .75rem; top: 3.5rem; max-width: min(20rem, 45vw); max-height: calc(100vh - 4.25rem); overflow: auto; padding: .75rem; border-radius: .4rem; background: Canvas; box-shadow: 0 .2rem .8rem #0004; }
       #outline[hidden], #outline-toggle[hidden] { display: none; }
       #outline a { display: block; color: inherit; padding: .15rem 0; text-decoration: none; }
+      #palette { position: fixed; z-index: 3; inset: 15% 20% auto; display: grid; gap: .35rem; padding: 1rem; border-radius: .5rem; background: Canvas; box-shadow: 0 .4rem 2rem #0008; }
+      #palette[hidden] { display: none; }
+      #palette button { font: inherit; text-align: left; }
     </style>
   </head>
   <body>
@@ -38,6 +41,16 @@
       <option value="__import__">Import Zed theme…</option>
     </select>
     <nav id="outline" aria-label="Document outline" hidden></nav>
+    <div id="palette" role="dialog" aria-label="Command palette" hidden>
+      <button type="button" data-command="open-file">Open File</button>
+      <button type="button" data-command="open-folder">Open Folder</button>
+      <button type="button" data-command="picker">Browse Current Folder</button>
+      <button type="button" data-command="copy-source">Copy Markdown</button>
+      <button type="button" data-command="toggle-outline">Toggle Contents</button>
+      <button type="button" data-command="theme-system">Use System Theme</button>
+      <button type="button" data-command="theme-light">Use Light Theme</button>
+      <button type="button" data-command="theme-dark">Use Dark Theme</button>
+    </div>
     <form id="search" role="search" hidden>
       <label><span class="visually-hidden">Find in document</span><input type="search" autocomplete="off" placeholder="Find in document"></label>
       <button type="button" data-step="-1" aria-label="Previous match">↑</button>
@@ -56,6 +69,7 @@
           if (action.kind === 'history') return Object.keys(action).length === 2 && ['back', 'forward', 'reload'].includes(action.payload);
           if (action.kind === 'theme') return Object.keys(action).length === 2 && (['system', 'light', 'dark', 'import'].includes(action.payload) || (action.payload?.named && typeof action.payload.named.name === 'string'));
           if (action.kind === 'open') return Object.keys(action).length === 2 && ['file', 'folder', 'picker'].includes(action.payload);
+          if (action.kind === 'focus') return Object.keys(action).length === 2 && ['shell', 'picker', 'search', 'palette', 'renderer'].includes(action.payload);
           if (action.kind === 'copy') return action.payload && Object.keys(action).length === 2 && ['source', 'code', 'rendered'].includes(action.payload.kind);
           if (action.kind !== 'search' || !action.payload || Object.keys(action).length !== 2) return false;
           const { kind, payload } = action.payload;
@@ -211,6 +225,27 @@
           }
           postNativeAction({ kind: 'history', payload: event.target.dataset.history });
         });
+        const palette = document.querySelector('#palette');
+        const openPalette = () => {
+          palette.hidden = false;
+          palette.querySelector('button').focus();
+          postNativeAction({ kind: 'focus', payload: 'palette' });
+        };
+        const closePalette = () => {
+          palette.hidden = true;
+          document.querySelector('#document').focus();
+          postNativeAction({ kind: 'focus', payload: 'renderer' });
+        };
+        palette.addEventListener('click', async (event) => {
+          if (!(event.target instanceof HTMLButtonElement)) return;
+          const command = event.target.dataset.command;
+          if (command === 'open-file' || command === 'open-folder') postNativeAction({ kind: 'open', payload: command.slice(5) });
+          else if (command === 'picker') postNativeAction({ kind: 'open', payload: 'picker' });
+          else if (command === 'copy-source' && await window.mdvrCopySource?.()) postNativeAction({ kind: 'copy', payload: { kind: 'source' } });
+          else if (command === 'toggle-outline') outlineToggle.click();
+          else if (command?.startsWith('theme-')) postNativeAction({ kind: 'theme', payload: command.slice(6) });
+          closePalette();
+        });
         const search = document.querySelector('#search');
         const searchInput = search.querySelector('input');
         const moveSearch = (backwards = false) => {
@@ -237,7 +272,11 @@
           else if (button?.dataset.step) moveSearch(button.dataset.step === '-1');
         });
         document.addEventListener('keydown', (event) => {
-          if (event.metaKey && event.key.toLowerCase() === 'o') {
+          if (event.metaKey && event.key.toLowerCase() === 'p') {
+            event.preventDefault();
+            if (event.shiftKey) openPalette();
+            else postNativeAction({ kind: 'open', payload: 'picker' });
+          } else if (event.metaKey && event.key.toLowerCase() === 'o') {
             event.preventDefault();
             postNativeAction({ kind: 'open', payload: event.shiftKey ? 'folder' : 'file' });
           } else if (event.metaKey && ['[', ']', 'r'].includes(event.key.toLowerCase())) {
@@ -250,6 +289,7 @@
             postNativeAction({ kind: 'text_scale', payload: step });
           } else if (event.metaKey && event.key.toLowerCase() === 'f') { event.preventDefault(); openSearch(); }
           else if (event.key === 'Escape' && !search.hidden) { event.preventDefault(); closeSearch(); }
+          else if (event.key === 'Escape' && !palette.hidden) { event.preventDefault(); closePalette(); }
         });
         announce('Renderer ready.');
       })();
