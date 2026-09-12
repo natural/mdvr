@@ -1,8 +1,9 @@
 # macOS packaging scaffolding
 
-Scripts here build and inspect one unsigned, arm64-only `.app` and compressed
-DMG. They do not build Rust or web inputs, sign, notarize, install anything, or
-modify `PATH`.
+Scripts here build and inspect unsigned arm64 or universal development artifacts.
+`release.sh` performs credential-gated universal build, hardened-runtime signing,
+notarization, stapling, and Gatekeeper checks. Nothing installs files or modifies
+`PATH`.
 
 ## Exact commands
 
@@ -21,10 +22,20 @@ sh scripts/verify/check-dmg.sh
 open packaging/build/mdvr.dmg
 ```
 
-Safe prerequisite check without writing the bundle:
+Safe prerequisite checks without writing release artifacts:
 
 ```sh
 sh packaging/build-app.sh --dry-run
+sh packaging/release.sh --dry-run
+```
+
+Universal signed release, after installing both Rust targets and storing a
+`notarytool` keychain profile:
+
+```sh
+SIGNING_IDENTITY='Developer ID Application: …' \
+NOTARY_PROFILE=mdvr \
+sh packaging/release.sh
 ```
 
 Explicit CLI installation remains manual and does not edit shell configuration:
@@ -62,11 +73,13 @@ and reruns full app inspection before detaching.
   remote URL CLI inputs.
 - `assets/icon.svg` is an original repository-owned design. `build-icon.sh`
   generates required raster sizes and `AppIcon.icns`; bundle inspection validates it.
-- Current release artifact is arm64-only. No x86_64 target or universal binary
-  is claimed.
-- Bundle is unsigned and unnotarized. Developer credentials, hardened-runtime
-  settings, notarization, stapling, Gatekeeper, clean-machine launch, and Intel
-  launch remain release blockers.
+- `build-universal.sh` builds pinned arm64/x86_64 targets and combines them with
+  `lipo`; current machine still lacks the x86_64 Rust target, so current artifact
+  remains arm64-only.
+- `release.sh` fails closed without `SIGNING_IDENTITY` and `NOTARY_PROFILE`, signs
+  with hardened runtime and timestamping, notarizes/staples app and DMG, then runs
+  `codesign`, `stapler`, and Gatekeeper checks. Current keychain lacks Developer ID
+  Application/notary credentials, so no signed artifact is claimed.
 - `LSMinimumSystemVersion` is 11.0, matching release Mach-O `LC_BUILD_VERSION`;
   inspection fails on metadata/binary drift.
 - Native code resolves production assets from `Contents/Resources/web` in the

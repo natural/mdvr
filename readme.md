@@ -34,7 +34,8 @@ scripts/verify/check-packaging.sh
 ```
 
 `Cargo.lock` and `web/bun.lock` stay tracked. Current packaging creates an unsigned
-arm64 development app. Universal builds require an installed Intel Rust target;
-signing and notarization require Apple credentials. See [design](docs/design.md),
+arm64 development app. `packaging/build-universal.sh` and `packaging/release.sh`
+fail closed until Intel Rust target and Developer ID/notary credentials are available.
+See [design](docs/design.md),
 [numbered implementation plans](docs/001-foundation-and-feasibility.md), and
 [acceptance evidence](docs/evidence/008-acceptance.md).

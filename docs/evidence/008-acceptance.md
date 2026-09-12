@@ -238,5 +238,10 @@ packages and are bundled with project license; full native GPUI dependency revie
 and final legal review remain external. No clean-machine test,
 signing, notarization, or Gatekeeper evidence exists.
 
-Signing/notarization credentials and packaging environment were not created or
-assumed. These are release blockers, not passes.
+`packaging/build-universal.sh` now fails closed unless both pinned Rust targets are
+installed, then combines and verifies both Mach-O slices. `packaging/release.sh`
+builds, hardened-runtime signs, notarizes, staples, and Gatekeeper-checks app and
+DMG using explicit keychain identity/profile inputs. Dry-run and shell validation
+pass. Execution remains blocked: x86_64 Rust std is absent, keychain has only an
+Apple Development identity, and no `notarytool` profile exists. No credentials were
+created or assumed; universal/signing/notarization remain release blockers, not passes.

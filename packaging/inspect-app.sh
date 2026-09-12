@@ -73,7 +73,10 @@ inspect_macho() {
     *Mach-O*)
         macho_count=$((macho_count + 1))
         archs=$(lipo -archs "$path") || fail "cannot inspect architectures: $path"
-        [ "$archs" = arm64 ] || fail "embedded Mach-O must be arm64-only: $path ($archs)"
+        case "$archs" in
+        arm64 | "x86_64 arm64" | "arm64 x86_64") ;;
+        *) fail "embedded Mach-O must be arm64 or universal: $path ($archs)" ;;
+        esac
         printf '  Mach-O: %s (%s)\n' "${path#"$app/"}" "$archs"
         otool -L "$path" || fail "cannot inspect linked libraries: $path"
         ;;

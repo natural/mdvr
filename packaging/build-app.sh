@@ -62,7 +62,10 @@ case "$kind" in
 *) fail "release binary is not Mach-O: $kind" ;;
 esac
 archs=$(lipo -archs "$binary")
-[ "$archs" = arm64 ] || fail "release binary must be arm64-only; found: $archs"
+case "$archs" in
+arm64 | "x86_64 arm64" | "arm64 x86_64") ;;
+*) fail "release binary must be arm64 or universal; found: $archs" ;;
+esac
 
 if $dry_run; then
     printf 'packaging: dry run passed\n'
