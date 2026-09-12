@@ -40,7 +40,8 @@ blanket license for transitive content.
   fallback because Bun test has no DOM. Renderer-generated Mermaid SVG is
   separately stripped of executable and external-reference attributes.
 - No third-party theme, font, image, grammar, or copied fixture asset is
-  shipped. Test fixtures remain test-only.
+  shipped. Test fixtures remain test-only. `assets/icon.svg` is an original
+  project asset created for mdvr and carries project MIT licensing.
 
 ## Unverified obligations and release blockers
 

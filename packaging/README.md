@@ -54,8 +54,8 @@ and reruns full app inspection before detaching.
   file opens. No custom URL scheme is included: design defines HTTP/HTTPS and
   `mailto:` external link handling, not an `mdvr:` scheme; design also rejects
   remote URL CLI inputs.
-- No icon is bundled because repository has no approved icon asset or
-  provenance. Release packaging remains blocked until one is supplied.
+- `assets/icon.svg` is an original repository-owned design. `build-icon.sh`
+  generates required raster sizes and `AppIcon.icns`; bundle inspection validates it.
 - Current release artifact is arm64-only. No x86_64 target or universal binary
   is claimed.
 - Bundle is unsigned and unnotarized. Developer credentials, hardened-runtime

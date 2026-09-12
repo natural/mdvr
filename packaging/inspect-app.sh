@@ -38,6 +38,10 @@ bundle_executable=$(plutil -extract CFBundleExecutable raw -o - "$plist")
 [ "$bundle_executable" = mdvr ] || fail "CFBundleExecutable is not mdvr: $bundle_executable"
 bundle_type=$(plutil -extract CFBundlePackageType raw -o - "$plist")
 [ "$bundle_type" = APPL ] || fail "CFBundlePackageType is not APPL: $bundle_type"
+icon=$(plutil -extract CFBundleIconFile raw -o - "$plist")
+[ "$icon" = AppIcon ] || fail "CFBundleIconFile is not AppIcon: $icon"
+[ -f "$contents/Resources/AppIcon.icns" ] || fail "bundle icon missing"
+file "$contents/Resources/AppIcon.icns" | grep -q 'Mac OS X icon' || fail "bundle icon is invalid"
 plutil -extract CFBundleDocumentTypes xml1 -o /dev/null "$plist" >/dev/null 2>&1 || fail "Markdown file association missing"
 if plutil -extract CFBundleURLTypes xml1 -o /dev/null "$plist" >/dev/null 2>&1; then
     fail "custom URL scheme is not supported by current design"

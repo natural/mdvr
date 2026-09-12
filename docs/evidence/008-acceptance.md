@@ -149,8 +149,9 @@ and actual HTTP fetch/redirect handling remain unverified.
 Performance distributions were not measured on the required 2020 M1 MacBook Air
 8 GB baseline. Intel/x86_64 and universal builds are blocked by the available
 arm64-only target/toolchain. Unsigned arm64 app and compressed DMG were built;
-read-only DMG mount passed full bundle/Mach-O/framework inspection. No icon,
-clean-machine test, signing, notarization, or Gatekeeper evidence exists.
+read-only DMG mount passed full bundle/Mach-O/framework/icon inspection. Original
+project icon is generated into ICNS. No clean-machine test, signing, notarization,
+or Gatekeeper evidence exists.
 
 Signing/notarization credentials and packaging environment were not created or
 assumed. These are release blockers, not passes.

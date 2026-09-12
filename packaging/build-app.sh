@@ -40,7 +40,7 @@ if [ "$#" -eq 1 ]; then
 fi
 
 [ "$(uname -s)" = Darwin ] || fail "macOS is required"
-for command in cp find file grep lipo mkdir otool plutil rm touch; do
+for command in cp find file grep iconutil lipo mkdir otool plutil rm sips touch; do
     command -v "$command" >/dev/null 2>&1 || fail "required command missing: $command"
 done
 [ -f "$binary" ] || fail "release binary missing: $binary"
@@ -74,8 +74,10 @@ fi
 
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/web"
+sh "$root/packaging/build-icon.sh" "$root/packaging/build/AppIcon.icns"
 cp "$binary" "$app/Contents/MacOS/mdvr"
 cp "$plist" "$app/Contents/Info.plist"
+cp "$root/packaging/build/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
 cp -R "$web_dist/." "$app/Contents/Resources/web/"
 chmod 755 "$app/Contents/MacOS/mdvr"
 find "$app/Contents" -type d -exec chmod 755 {} +
