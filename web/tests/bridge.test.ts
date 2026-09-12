@@ -2,6 +2,9 @@ import { expect, test } from "bun:test";
 
 const html = await Bun.file(new URL("../index.html", import.meta.url)).text();
 const main = await Bun.file(new URL("../src/main.ts", import.meta.url)).text();
+const readerCss = await Bun.file(
+  new URL("../src/reader.css", import.meta.url),
+).text();
 const script = html.slice(
   html.indexOf("const validBridgeAction"),
   html.indexOf("let navigationContext"),
@@ -43,6 +46,14 @@ test("GIF resources are frozen to first PNG frame", () => {
   expect(main).toContain('mime === "image/gif"');
   expect(main).toContain("createImageBitmap");
   expect(main).toContain('canvas.toBlob(resolve, "image/png")');
+});
+
+test("narrow layout hides outline and keeps toolbar clear of content", () => {
+  expect(html).toContain("@media (max-width: 38rem)");
+  expect(html).toContain(
+    "#outline, #outline-toggle { display: none !important; }",
+  );
+  expect(readerCss).toContain("padding: 7rem 1rem 1rem");
 });
 
 test("native errors use bounded dismissible text-only status", () => {

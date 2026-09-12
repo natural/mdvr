@@ -80,7 +80,9 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   temporary exact DOM range only after Clipboard API failure. Evidence:
   [code copy](screenshots/code-copy.png).
 - Responsive Contents control builds links using safe text nodes from rendered
-  heading IDs. Live outline expanded with `mdvr` and `Development`; selecting
+  heading IDs. At narrow widths CSS hides both outline and toggle, moves toolbar
+  into an overflow-safe second row, and reserves reader space. Live outline expanded
+  with `mdvr` and `Development`; selecting
   `Development` drove validated anchor navigation and changed scroll position.
   Evidence: [outline](screenshots/outline.png).
 - Reload captures first visible stable block plus viewport offset and exact
@@ -186,7 +188,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   [rendered copy and select all](screenshots/rendered-copy-select-all.png).
 - Renderer posts closed `render.ready` only after synchronous DOM mount; native
   bridge rejects stale document/generation and records commit-to-ready latency.
-- Latest local verification passed 83 Rust tests/clippy, 31 web tests/build,
+- Latest local verification passed 83 Rust tests/clippy, 32 web tests/build,
   restricted-file WKWebView probe, current release build, app inspection, and DMG
   inspection.
 

@@ -25,6 +25,13 @@
       #status { position: fixed; z-index: 4; left: 50%; bottom: 1rem; translate: -50% 0; display: flex; gap: .75rem; align-items: center; max-width: min(42rem, 90vw); padding: .65rem .85rem; border-radius: .4rem; background: Canvas; color: CanvasText; box-shadow: 0 .2rem .8rem #0006; }
       #status[hidden] { display: none; }
       #status button { font: inherit; }
+      @media (max-width: 54rem) {
+        #history { left: .75rem; right: .75rem; top: 3.5rem; overflow-x: auto; }
+        #theme { right: .75rem; }
+      }
+      @media (max-width: 38rem) {
+        #outline, #outline-toggle { display: none !important; }
+      }
     </style>
   </head>
   <body>

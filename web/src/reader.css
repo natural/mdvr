@@ -204,26 +204,8 @@ body {
   outline-offset: 3px;
 }
 
-.reader .outline {
-  position: sticky;
-  top: 1rem;
-  max-height: calc(100vh - 2rem);
-  overflow: auto;
-}
-
 @media (max-width: 54rem) {
   .reader {
-    padding: 1rem;
-  }
-
-  .reader .outline {
-    position: static;
-    max-height: none;
-  }
-}
-
-@media (max-width: 38rem) {
-  .reader .outline {
-    display: none;
+    padding: 7rem 1rem 1rem;
   }
 }
