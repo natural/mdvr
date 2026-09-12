@@ -154,6 +154,12 @@ fn resource_mime(reference: &str) -> Option<String> {
     )
 }
 
+fn missing_dock_document(launch: &LaunchPlan, preferences: &Preferences) -> Option<PathBuf> {
+    (launch.intent == LaunchIntent::Dock && launch.state.document.is_none())
+        .then(|| preferences.last_document.clone())
+        .flatten()
+}
+
 fn preference_locator(locator: &Locator) -> ReadingLocator {
     ReadingLocator {
         heading: locator.heading.clone(),
@@ -281,6 +287,7 @@ struct MdvrView {
     startup_error: Option<String>,
     theme_family: Option<ThemeFamily>,
     render_started: Option<Instant>,
+    initialized: bool,
     remote_consent: Option<(crate::contracts::DocumentId, bool)>,
     remote_results: Receiver<ResourceResult>,
     remote_sender: Sender<ResourceResult>,
@@ -312,6 +319,7 @@ impl MdvrView {
             startup_error: None,
             theme_family: None,
             render_started: None,
+            initialized: false,
             remote_consent: None,
             remote_results,
             remote_sender,
@@ -356,6 +364,7 @@ impl MdvrView {
         self.preferences = conventional_path()
             .map(|path| load_or_default(&path).preferences)
             .unwrap_or_default();
+        self.initialized = true;
         self.shell.text_scale_percent = self.preferences.text_scale_percent;
         self.pending_initial_locator = launch.state.reading_locator.clone();
         self.theme_family = self
@@ -363,6 +372,13 @@ impl MdvrView {
             .theme_file
             .as_deref()
             .and_then(|path| import_file(path).ok());
+        if let Some(path) = missing_dock_document(launch, &self.preferences) {
+            self.failed_path = Some(path.clone());
+            self.report_error(format!(
+                "Cannot restore {}: file does not exist",
+                path.display()
+            ));
+        }
         if launch.state.document.is_none() {
             self.start_discovery(cx);
             window.focus(&self.picker_focus);
@@ -1381,8 +1397,10 @@ impl Drop for MdvrView {
 impl Render for MdvrView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.process_next_open(window, cx);
-        self.update_appearance(window);
-        self.capture_window_geometry(window);
+        if self.initialized {
+            self.update_appearance(window);
+            self.capture_window_geometry(window);
+        }
         if let Some(web_view) = self.web_view.as_ref() {
             web_view.sync_frame();
             return div().size_full().into_any_element();
@@ -1675,6 +1693,26 @@ mod tests {
             generation,
             action,
         }
+    }
+
+    #[test]
+    fn missing_cold_dock_document_is_reported() {
+        let path = PathBuf::from("/saved/missing.md");
+        let plan = LaunchPlan {
+            intent: LaunchIntent::Dock,
+            state: crate::preferences::LaunchState {
+                browsing_root: Some(PathBuf::from("/saved")),
+                document: None,
+                reading_locator: None,
+            },
+            picker_root: PathBuf::from("/saved"),
+            explicit: false,
+        };
+        let preferences = Preferences {
+            last_document: Some(path.clone()),
+            ..Preferences::default()
+        };
+        assert_eq!(missing_dock_document(&plan, &preferences), Some(path));
     }
 
     #[test]

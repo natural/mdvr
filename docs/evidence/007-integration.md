@@ -99,7 +99,7 @@ work as unintegrated slices.
 ```text
 cargo fmt --check                         passed
 cargo check --locked                      passed; 1 upstream future-incompat warning
-cargo test --locked                       passed; 86 tests
+cargo test --locked                       passed; 87 tests
 cargo clippy --locked --all-targets -- -D warnings
                                            passed; 1 upstream future-incompat warning
 cd web && bun install --frozen-lockfile    passed; 135 packages
