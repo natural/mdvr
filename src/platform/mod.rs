@@ -1033,6 +1033,13 @@ impl EmbeddedWebView {
         Ok(())
     }
 
+    pub fn clear_error(&self) {
+        assert!(main_thread(), "WKWebView must be used on main thread");
+        if self.pending_state.page_ready() {
+            evaluate_javascript(self.view, "window.mdvrClearError();");
+        }
+    }
+
     pub fn show_error(&self, message: &str) -> Result<(), serde_json::Error> {
         assert!(main_thread(), "WKWebView must be used on main thread");
         if self.pending_state.page_ready() {

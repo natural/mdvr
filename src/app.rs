@@ -1305,6 +1305,10 @@ impl MdvrView {
     fn apply_reload(&mut self, outcome: ReloadOutcome) {
         match outcome {
             ReloadOutcome::Ready { request, source } => {
+                self.startup_error = None;
+                if let Some(web_view) = self.web_view.as_ref() {
+                    web_view.clear_error();
+                }
                 let Ok(navigation_request) = self.navigation.reload_at(request.generation) else {
                     eprintln!("mdvr: ignored stale reload generation");
                     return;
@@ -1315,10 +1319,10 @@ impl MdvrView {
                 if let Ok(navigation_request) = self.navigation.reload_at(request.generation) {
                     let _ = self.navigation.fail_load(&navigation_request);
                 }
-                eprintln!(
-                    "mdvr: reload generation {} failed: {error}",
+                self.report_error(format!(
+                    "Reload generation {} failed: {error}",
                     request.generation.get()
-                );
+                ));
             }
         }
     }

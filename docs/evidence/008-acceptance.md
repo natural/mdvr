@@ -58,7 +58,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   Markdown link changed `First` to `Second`; editing that second file then changed
   the visible heading to `Second Reloaded`. This also verifies bridge polling and
   reload-worker transfer to the newly navigated document. Evidence:
-  [navigation and reload](screenshots/navigation-reload.png).
+  [navigation and reload](screenshots/navigation-reload.png). Deleting a live fixture
+  retained generation 1 and emitted bounded visible reload errors for generations 2/3;
+  recreating it rendered generation 4 in 26.0 ms and automatically cleared the alert.
+  Orca accessibility reads were blocked during this run, so logs/code establish retry
+  and recovery but not a new screenshot.
 - Context-bound local image requests now cross the validated revision-1 bridge,
   resolve only through native canonical-root policy, and return bounded bytes as
   object URLs. A same-root SVG rendered in live WKWebView; unsupported formats,

@@ -294,6 +294,7 @@
           status.hidden = false;
           return true;
         };
+        window.mdvrClearError = () => { status.hidden = true; };
         window.mdvrSetHistoryAvailability = (back, forward) => {
           document.querySelector('[data-history="back"]').disabled = !back;
           document.querySelector('[data-history="forward"]').disabled = !forward;

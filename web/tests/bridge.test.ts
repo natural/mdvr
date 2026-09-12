@@ -59,6 +59,7 @@ test("narrow layout hides outline and keeps toolbar clear of content", () => {
 test("native errors use bounded dismissible text-only status", () => {
   expect(html).toContain('id="status" role="alert" hidden');
   expect(html).toContain("window.mdvrShowError");
+  expect(html).toContain("window.mdvrClearError");
   expect(html).toContain("status.querySelector('span').textContent = message");
 });
 
