@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "bun@1.4.0",
   "scripts": {
-    "build": "bun build ./index.html --outdir dist --minify && bun -e \"const p='dist/index.html'; await Bun.write(p, (await Bun.file(p).text()).replaceAll(' crossorigin', ''));\""
+    "build": "bun run build.ts"
   },
   "dependencies": {
     "dompurify": "^3.4.15",

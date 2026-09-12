@@ -40,9 +40,17 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   verify bundle presence and local production module selection.
 - After callback registration was fixed, `target/debug/mdvr readme.md` showed
   styled `Loading document…` text in Orca. Navigation allow and finish callbacks
-  were observed. The black surface is resolved, but document rendering is not:
-  JavaScript evaluation reports `window.mdvrLoadDocument is not a function`.
-  Renderer bundle initialization remains under investigation.
+  were observed. Subsequent renderer startup failed because WebKit rejected
+  external ES modules over `file://`. `web/build.ts` now changes the generated
+  self-contained script to classic `defer`, preserving CSP and restricted read
+  access. The built bundle initializes and renders Markdown.
+- Runtime regression command:
+  `swift scripts/verify/check-renderer.swift web/dist/index.html` passed.
+  This probes actual WKWebView loading and asserts rendered heading content.
+- Orca confirmed `target/debug/mdvr readme.md` visibly renders headings, links,
+  paragraphs, and code blocks on macOS 26.7 (25G229), arm64. Evidence:
+  [rendered readme](screenshots/readme-rendered.png). This uses native code from
+  checkpoint `1d3b443` plus the classic-script build fix.
 - Source is queued until `didFinishNavigation`. Regression tests cover callback
   class registration and latest-generation pending-source drain. The queue write
   now executes in release builds too, rather than only inside `debug_assert!`.
@@ -57,8 +65,8 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 - Explicit-file launch remained running and printed `mdvr: accepted ...`.
 - Frontmost/process launch was confirmed for the pre-fix build and the
   pre-fix window was observable through Orca.
-- Post-fix window displays the loading sentinel through Orca. Document content,
-  link navigation, action bridge, and reload remain unaccepted.
+- Post-fix window visibly renders `readme.md` through Orca. Link navigation,
+  action bridge, reload, and other desktop scenarios remain unaccepted.
 
 ## Unverified desktop behavior
 
