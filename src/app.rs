@@ -799,67 +799,77 @@ impl Render for MdvrView {
     }
 }
 
-pub fn run(launch: LaunchPlan) {
-    let launch_for_window = launch.clone();
+fn open_mdvr_window(cx: &mut App, launch: LaunchPlan, announce: bool) {
     let geometry = conventional_path()
         .map(|path| load_or_default(&path).preferences.window)
         .unwrap_or_default();
-    Application::new().run(move |cx: &mut App| {
-        let displays = cx
-            .displays()
-            .into_iter()
-            .map(|display| {
-                let bounds = display.bounds();
-                DisplayBounds {
-                    x: (bounds.origin.x / px(1.0)).round() as i32,
-                    y: (bounds.origin.y / px(1.0)).round() as i32,
-                    width: (bounds.size.width / px(1.0)).round().max(0.0) as u32,
-                    height: (bounds.size.height / px(1.0)).round().max(0.0) as u32,
-                }
-            })
-            .collect::<Vec<_>>();
-        let geometry = geometry.restore_on(&displays);
-        let bounds = Bounds {
-            origin: point(px(geometry.x as f32), px(geometry.y as f32)),
-            size: size(px(geometry.width as f32), px(geometry.height as f32)),
-        };
-        let opened = cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                ..WindowOptions::default()
-            },
-            move |_window, cx| {
-                let mut shell = ShellState::new();
-                shell.root = Some(launch_for_window.picker_root.clone());
-                shell.current_document = launch_for_window.state.document.clone();
-                let navigation = NavigationState::new(launch_for_window.picker_root.clone());
-                cx.new(|cx| MdvrView::new(shell, navigation, cx))
-            },
-        );
-        match opened {
-            Ok(window) => {
-                let _ = window.update(cx, |view, native_window, cx| {
-                    view.initialize(native_window, &launch, cx);
-                    cx.notify();
-                });
-                if launch.explicit {
-                    let path = launch
-                        .state
-                        .document
-                        .as_ref()
-                        .or(launch.state.browsing_root.as_ref());
-                    if let Some(path) = path {
-                        println!("mdvr: accepted {}", path.display());
-                    }
-                }
-                cx.activate(true);
+    let displays = cx
+        .displays()
+        .into_iter()
+        .map(|display| {
+            let bounds = display.bounds();
+            DisplayBounds {
+                x: (bounds.origin.x / px(1.0)).round() as i32,
+                y: (bounds.origin.y / px(1.0)).round() as i32,
+                width: (bounds.size.width / px(1.0)).round().max(0.0) as u32,
+                height: (bounds.size.height / px(1.0)).round().max(0.0) as u32,
             }
-            Err(error) => {
-                eprintln!("mdvr: launch failed: {error}");
+        })
+        .collect::<Vec<_>>();
+    let geometry = geometry.restore_on(&displays);
+    let bounds = Bounds {
+        origin: point(px(geometry.x as f32), px(geometry.y as f32)),
+        size: size(px(geometry.width as f32), px(geometry.height as f32)),
+    };
+    let launch_for_window = launch.clone();
+    match cx.open_window(
+        WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..WindowOptions::default()
+        },
+        move |_window, cx| {
+            let mut shell = ShellState::new();
+            shell.root = Some(launch_for_window.picker_root.clone());
+            shell.current_document = launch_for_window.state.document.clone();
+            let navigation = NavigationState::new(launch_for_window.picker_root.clone());
+            cx.new(|cx| MdvrView::new(shell, navigation, cx))
+        },
+    ) {
+        Ok(window) => {
+            let _ = window.update(cx, |view, native_window, cx| {
+                view.initialize(native_window, &launch, cx);
+                cx.notify();
+            });
+            if announce && launch.explicit {
+                let path = launch
+                    .state
+                    .document
+                    .as_ref()
+                    .or(launch.state.browsing_root.as_ref());
+                if let Some(path) = path {
+                    println!("mdvr: accepted {}", path.display());
+                }
+            }
+            cx.activate(true);
+        }
+        Err(error) => {
+            eprintln!("mdvr: launch failed: {error}");
+            if announce {
                 std::process::exit(1);
             }
         }
+    }
+}
+
+pub fn run(launch: LaunchPlan) {
+    let reopen_launch = launch.clone();
+    let application = Application::new();
+    application.on_reopen(move |cx| {
+        if cx.windows().is_empty() {
+            open_mdvr_window(cx, reopen_launch.clone(), false);
+        }
     });
+    application.run(move |cx: &mut App| open_mdvr_window(cx, launch, true));
 }
 
 #[cfg(test)]

@@ -111,6 +111,10 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   without titlebar-growth drift. Isolated 800×600 at (200,200) reopened there;
   observed outer window was 800×632 including titlebar. Evidence:
   [window geometry](screenshots/window-geometry.png).
+- macOS reopen callback recreates one window only when none remain, using retained
+  launch state and latest safe geometry. Packaged app window was closed; process
+  stayed alive; reopening bundle restored same document in new window under same
+  PID. Evidence: [close and reopen](screenshots/reopen.png).
 - Latest checkpoint verified debug build, 77 Rust tests/clippy and 22 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
@@ -129,7 +133,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 ## Unverified desktop behavior
 
 The following remain unverified against a live embedded WKWebView: resize and
-clipping, picker text filtering and broader focus transitions, close/reopen and activation,
+clipping, automated picker text filtering and broader focus transitions,
 cross-block selection and rendered/source clipboard behavior, reload selection/locator
 preservation, non-search action bridge execution, CSP enforcement, Mermaid async output,
 remote resource consent, dynamic system-appearance changes, and imported themes.
