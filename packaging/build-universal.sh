@@ -4,6 +4,15 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 out="$root/target/release/mdvr"
 
+if [ -x /opt/homebrew/opt/rustup/bin/rustup ]; then
+    PATH=/opt/homebrew/opt/rustup/bin:$PATH
+    RUSTUP_TOOLCHAIN=1.98.1
+    export PATH RUSTUP_TOOLCHAIN
+elif command -v rustup >/dev/null 2>&1; then
+    RUSTUP_TOOLCHAIN=1.98.1
+    export RUSTUP_TOOLCHAIN
+fi
+
 for command in cargo rustc; do
     command -v "$command" >/dev/null 2>&1 || {
         echo "packaging: required command missing: $command" >&2

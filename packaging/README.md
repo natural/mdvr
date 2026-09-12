@@ -78,9 +78,9 @@ and reruns full app inspection before detaching.
   remote URL CLI inputs.
 - `assets/icon.svg` is an original repository-owned design. `build-icon.sh`
   generates required raster sizes and `AppIcon.icns`; bundle inspection validates it.
-- `build-universal.sh` builds pinned arm64/x86_64 targets and combines them with
-  `lipo`; current machine still lacks the x86_64 Rust target, so current artifact
-  remains arm64-only.
+- `build-universal.sh` selects pinned Rust 1.98.1 through rustup when available,
+  builds arm64/x86_64 targets, combines them with `lipo`, and verifies both slices.
+  Current app and DMG contain `x86_64 arm64`; Intel runtime still needs Intel hardware.
 - `release.sh` fails closed without `SIGNING_IDENTITY` and `NOTARY_PROFILE`, signs
   with hardened runtime and timestamping, notarizes/staples app and DMG, then runs
   `codesign`, `stapler`, and Gatekeeper checks. Current keychain lacks Developer ID

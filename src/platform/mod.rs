@@ -267,7 +267,7 @@ pub(crate) fn open_local_file(path: &Path, require_confirmation: bool) -> bool {
         }
         let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
         let opened: BOOL = msg_send![workspace, openURL: target];
-        opened
+        opened == objc::runtime::YES
     }
 }
 
@@ -336,7 +336,7 @@ pub(crate) fn open_external_url(url: &str) -> bool {
         }
         let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
         let opened: BOOL = msg_send![workspace, openURL: target];
-        opened
+        opened == objc::runtime::YES
     }
 }
 
@@ -824,7 +824,7 @@ impl EmbeddedWebView {
                 return false;
             }
             let accepted: BOOL = msg_send![window, makeFirstResponder: self.view];
-            accepted
+            accepted == objc::runtime::YES
         }
     }
 

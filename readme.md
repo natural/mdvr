@@ -38,8 +38,9 @@ sh scripts/verify/check-dmg.sh packaging/build/mdvr.dmg
 ```
 
 `Cargo.lock` and `web/bun.lock` stay tracked. Current packaging creates an unsigned
-arm64 development app. `packaging/build-universal.sh` and `packaging/release.sh`
-fail closed until Intel Rust target and Developer ID/notary credentials are available.
+universal (`x86_64 arm64`) development app and DMG. `packaging/release.sh` fails
+closed until Developer ID/notary credentials are available; Intel runtime still
+needs Intel hardware.
 See [design](docs/design.md),
 [numbered implementation plans](docs/001-foundation-and-feasibility.md), and
 [acceptance evidence](docs/evidence/008-acceptance.md).

@@ -280,8 +280,11 @@ prose fixture with 2,198 blocks and measured warm reload commit-to-ready times o
 188.8, 179.6, 183.8, 179.8, and 181.0 ms (median 181.0 ms); observed save-to-ready
 totals including poll/debounce were 331.9, 327.8, 318.0, 312.9, and 321.7 ms
 (median 321.7 ms). This meets the <200 ms post-debounce target by median on the provisional M2 Pro,
-not the unavailable M1 baseline. Intel/x86_64 and universal builds are blocked by available arm64-only target/toolchain. Unsigned arm64 app and compressed DMG were built;
-read-only DMG mount passed full bundle/Mach-O/framework/icon inspection. Pinned
+not the unavailable M1 baseline. Rustup 1.29.1 supplied pinned Rust 1.98.1 arm64
+and x86_64 targets; both release slices compiled and `lipo` produced verified
+`x86_64 arm64` app and compressed DMG. The universal binary runs through its arm64
+slice here; Intel runtime remains unverified without Intel hardware. Read-only DMG
+mount passed full bundle/Mach-O/framework/icon inspection. Pinned
 macOS CI now rebuilds release binary, app, and DMG and reruns mounted-image inspection
 on every push/PR. Original
 project icon is generated into ICNS. Bundle minimum macOS 11.0 matches release
@@ -295,6 +298,8 @@ signing, notarization, or Gatekeeper evidence exists.
 installed, then combines and verifies both Mach-O slices. `packaging/release.sh`
 builds, hardened-runtime signs, notarizes, staples, and Gatekeeper-checks app and
 DMG using explicit keychain identity/profile inputs. Dry-run and shell validation
-pass. Execution remains blocked: x86_64 Rust std is absent, keychain has only an
-Apple Development identity, and no `notarytool` profile exists. No credentials were
-created or assumed; universal/signing/notarization remain release blockers, not passes.
+pass. Universal build execution now passes. Available Apple Development identity successfully
+hardened-runtime signed nested executable and app; `codesign --verify --deep --strict`
+passed. Distribution signing remains blocked: no Developer ID Application identity or
+`notarytool` profile exists. No credentials were created or assumed; Developer ID
+signing/notarization and Intel runtime remain blockers, not passes.
