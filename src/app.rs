@@ -446,6 +446,27 @@ impl MdvrView {
     }
 
     fn handle_picker_key(&mut self, event: &KeyDownEvent, window: &Window, cx: &mut Context<Self>) {
+        if event.keystroke.modifiers.platform {
+            match event.keystroke.key.as_str() {
+                "o" if event.keystroke.modifiers.shift => {
+                    if let Some(path) = choose_directory() {
+                        self.open_directory(path, cx);
+                    }
+                }
+                "o" => {
+                    if let Some(path) = choose_markdown_file() {
+                        self.pending_open.push_back(OpenRequest { path, ack: None });
+                        cx.notify();
+                    }
+                }
+                "p" if self.picker_return && !event.keystroke.modifiers.shift => {
+                    self.restore_current_document(window, cx)
+                }
+                "r" if self.failed_path.is_some() => self.retry_failed_path(window, cx),
+                _ => {}
+            }
+            return;
+        }
         match event.keystroke.key.as_str() {
             "up" | "arrowup" => self.shell.picker.move_selection(-1),
             "down" | "arrowdown" => self.shell.picker.move_selection(1),

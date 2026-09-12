@@ -108,7 +108,9 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   navigation/document state while showing the picker; Escape recreated the embedded
   viewer and restored the same `design.md` document rather than discarding it.
   Evidence: [picker over document](screenshots/picker-return-open.png),
-  [picker Escape return](screenshots/picker-return-document.png). Selecting
+  [picker Escape return](screenshots/picker-return-document.png). Native picker
+  now routes ⌘O/⇧⌘O without inserting shortcut characters, toggles back to the
+  document on ⌘P, and uses ⌘R to retry a failed startup path. Selecting
   `docs/design.md` from that picker preserved prior `readme.md` as enabled Back
   history even though WKWebView was recreated; readiness queuing retained control
   state. Evidence: [picker history](screenshots/picker-history.png).
