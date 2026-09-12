@@ -46,6 +46,13 @@ test("local images use context-bound native resource requests", () => {
   expect(html).toContain("URL.revokeObjectURL(url)");
 });
 
+test("history controls and shortcuts stay native-owned", () => {
+  expect(html).toContain('aria-label="Document navigation"');
+  expect(html).toContain("kind: 'history'");
+  expect(html).toContain("['[', ']', 'r'].includes(event.key.toLowerCase())");
+  expect(html).not.toContain("history.back");
+});
+
 test("text scale shortcuts stay native-owned", () => {
   expect(html).toContain("kind: 'text_scale'");
   expect(html).toContain("['+', '=', '-', '0'].includes(event.key)");

@@ -485,6 +485,8 @@ pub enum ActionMessage {
     Focus(FocusOwner),
     #[serde(rename = "text_scale")]
     TextScale(TextScaleAction),
+    #[serde(rename = "history")]
+    History(HistoryAction),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -502,6 +504,14 @@ pub enum TextScaleAction {
     Increase,
     Decrease,
     Reset,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryAction {
+    Back,
+    Forward,
+    Reload,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

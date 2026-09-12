@@ -13,6 +13,8 @@
       #search input { width: 16rem; font: inherit; }
       #search button { font: inherit; }
       #outline-toggle { position: fixed; z-index: 2; left: .75rem; top: .75rem; font: inherit; }
+      #history { position: fixed; z-index: 2; left: 7rem; top: .75rem; display: flex; gap: .25rem; }
+      #history button { font: inherit; }
       #outline { position: fixed; z-index: 2; left: .75rem; top: 3.5rem; max-width: min(20rem, 45vw); max-height: calc(100vh - 4.25rem); overflow: auto; padding: .75rem; border-radius: .4rem; background: Canvas; box-shadow: 0 .2rem .8rem #0004; }
       #outline[hidden], #outline-toggle[hidden] { display: none; }
       #outline a { display: block; color: inherit; padding: .15rem 0; text-decoration: none; }
@@ -20,6 +22,11 @@
   </head>
   <body>
     <button id="outline-toggle" type="button" aria-expanded="false" hidden>Contents</button>
+    <div id="history" aria-label="Document navigation">
+      <button type="button" data-history="back" aria-label="Back" disabled>←</button>
+      <button type="button" data-history="forward" aria-label="Forward" disabled>→</button>
+      <button type="button" data-history="reload">Reload</button>
+    </div>
     <nav id="outline" aria-label="Document outline" hidden></nav>
     <form id="search" role="search" hidden>
       <label><span class="visually-hidden">Find in document</span><input type="search" autocomplete="off" placeholder="Find in document"></label>
@@ -36,6 +43,7 @@
           if (action.kind === 'select_all') return Object.keys(action).length === 1;
           if (action.kind === 'outline') return Object.keys(action).length === 2 && ['open', 'close'].includes(action.payload);
           if (action.kind === 'text_scale') return Object.keys(action).length === 2 && ['increase', 'decrease', 'reset'].includes(action.payload);
+          if (action.kind === 'history') return Object.keys(action).length === 2 && ['back', 'forward', 'reload'].includes(action.payload);
           if (action.kind === 'copy') return action.payload && Object.keys(action).length === 2 && action.payload.kind === 'code';
           if (action.kind !== 'search' || !action.payload || Object.keys(action).length !== 2) return false;
           const { kind, payload } = action.payload;
@@ -151,6 +159,14 @@
           outlineToggle.setAttribute('aria-expanded', String(!outline.hidden));
           postNativeAction({ kind: 'outline', payload: outline.hidden ? 'close' : 'open' });
         });
+        window.mdvrSetHistoryAvailability = (back, forward) => {
+          document.querySelector('[data-history="back"]').disabled = !back;
+          document.querySelector('[data-history="forward"]').disabled = !forward;
+        };
+        document.querySelector('#history').addEventListener('click', (event) => {
+          if (!(event.target instanceof HTMLButtonElement)) return;
+          postNativeAction({ kind: 'history', payload: event.target.dataset.history });
+        });
         const search = document.querySelector('#search');
         const searchInput = search.querySelector('input');
         const moveSearch = (backwards = false) => {
@@ -177,7 +193,11 @@
           else if (button?.dataset.step) moveSearch(button.dataset.step === '-1');
         });
         document.addEventListener('keydown', (event) => {
-          if (event.metaKey && ['+', '=', '-', '0'].includes(event.key)) {
+          if (event.metaKey && ['[', ']', 'r'].includes(event.key.toLowerCase())) {
+            event.preventDefault();
+            const action = ({ '[': 'back', ']': 'forward', 'r': 'reload' })[event.key.toLowerCase()];
+            postNativeAction({ kind: 'history', payload: action });
+          } else if (event.metaKey && ['+', '=', '-', '0'].includes(event.key)) {
             event.preventDefault();
             const step = ({ '0': 'reset', '-': 'decrease' })[event.key] ?? 'increase';
             postNativeAction({ kind: 'text_scale', payload: step });

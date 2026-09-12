@@ -153,6 +153,7 @@ fn dispatch_bridge_action(
             crate::contracts::TextScaleAction::Decrease => ShellCommand::DecreaseTextSize,
             crate::contracts::TextScaleAction::Reset => ShellCommand::ResetTextSize,
         }),
+        ActionMessage::History(_) => {}
         ActionMessage::CapturePosition(_) | ActionMessage::RestorePosition(_) => {
             unreachable!("router filters bridge actions")
         }
@@ -387,11 +388,16 @@ impl MdvrView {
                     .map_err(|error| eprintln!("mdvr: cannot establish resource policy: {error:?}"))
                     .ok()
             });
-        if let Some(web_view) = self.web_view.as_mut()
-            && let Err(error) =
+        if let Some(web_view) = self.web_view.as_mut() {
+            if let Err(error) =
                 web_view.set_navigation_context(context.document, context.generation)
-        {
-            eprintln!("mdvr: cannot update renderer navigation context: {error}");
+            {
+                eprintln!("mdvr: cannot update renderer navigation context: {error}");
+            }
+            web_view.set_history_availability(
+                self.navigation.can_go_back(),
+                self.navigation.can_go_forward(),
+            );
         }
     }
 
@@ -480,6 +486,18 @@ impl MdvrView {
                             self.appearance_mode = None;
                             self.save_preferences();
                             cx.notify();
+                        }
+                        match action.action {
+                            ActionMessage::History(crate::contracts::HistoryAction::Back) => {
+                                self.go_back(cx)
+                            }
+                            ActionMessage::History(crate::contracts::HistoryAction::Forward) => {
+                                self.go_forward(cx)
+                            }
+                            ActionMessage::History(crate::contracts::HistoryAction::Reload) => {
+                                self.reload(cx)
+                            }
+                            _ => {}
                         }
                         if focus_renderer && let Some(web_view) = self.web_view.as_ref() {
                             let _ = web_view.focus();
@@ -630,16 +648,20 @@ impl MdvrView {
         }
     }
 
-    #[allow(dead_code)]
     fn go_back(&mut self, cx: &mut Context<Self>) {
         if let Ok(Some(request)) = self.navigation.go_back(Locator::start()) {
             self.load_navigation(request, cx);
         }
     }
 
-    #[allow(dead_code)]
     fn go_forward(&mut self, cx: &mut Context<Self>) {
         if let Ok(Some(request)) = self.navigation.go_forward(Locator::start()) {
+            self.load_navigation(request, cx);
+        }
+    }
+
+    fn reload(&mut self, cx: &mut Context<Self>) {
+        if let Ok(request) = self.navigation.reload() {
             self.load_navigation(request, cx);
         }
     }

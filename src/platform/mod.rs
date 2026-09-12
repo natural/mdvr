@@ -805,6 +805,14 @@ impl EmbeddedWebView {
         Ok(())
     }
 
+    pub fn set_history_availability(&self, back: bool, forward: bool) {
+        assert!(main_thread(), "WKWebView must be used on main thread");
+        evaluate_javascript(
+            self.view,
+            &format!("window.mdvrSetHistoryAvailability({back}, {forward});"),
+        );
+    }
+
     pub fn deliver_resource(&self, result: ResourceResult) -> Result<(), ContractError> {
         assert!(main_thread(), "WKWebView must be used on main thread");
         let json = String::from_utf8(encode(&Envelope::new(Message::ResourceResult(result)))?)

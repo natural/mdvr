@@ -102,7 +102,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   bounds 50–300%, reapplies validated appearance tokens, and atomically persists
   scale. Isolated runtime ⌘= changed visible scale and saved 110%. Evidence:
   [text scale](screenshots/text-scale.png).
-- Latest checkpoint verified debug build, 77 Rust tests/clippy and 21 web tests/build.
+- Visible Back/Forward/Reload controls and ⌘[/⌘]/⌘R route through context-bound
+  native history actions rather than browser history. Live sequence opened
+  `second.md`, returned to `first.md`, then moved forward to `second.md`, retaining
+  same window and transferring reload watcher. Evidence: [history](screenshots/history.png).
+- Latest checkpoint verified debug build, 77 Rust tests/clippy and 22 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 
