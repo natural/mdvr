@@ -368,12 +368,24 @@ export function loadDocument(source: string, generation = 1): RenderModel {
     return model;
 }
 
-export function createResourceUrl(
+export async function createResourceUrl(
     mime: string,
     bytes: number[],
-): string | null {
-    if (!/^image\/(?:png|jpeg|webp|svg\+xml)$/.test(mime)) return null;
+): Promise<string | null> {
+    if (!/^image\/(?:png|jpeg|webp|gif|svg\+xml)$/.test(mime)) return null;
     const raw = new Uint8Array(bytes);
+    if (mime === "image/gif") {
+        const bitmap = await createImageBitmap(new Blob([raw], { type: mime }));
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+        bitmap.close();
+        const firstFrame = await new Promise<Blob | null>((resolve) =>
+            canvas.toBlob(resolve, "image/png"),
+        );
+        return firstFrame ? URL.createObjectURL(firstFrame) : null;
+    }
     const body: BlobPart =
         mime === "image/svg+xml"
             ? sanitizeGeneratedSvg(new TextDecoder().decode(raw))

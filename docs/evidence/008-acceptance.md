@@ -132,7 +132,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   heading/code content without truncation. Evidence:
   [large confirmation](screenshots/large-confirm.png),
   [large rendered](screenshots/large-rendered.png).
-- Latest checkpoint verified debug build, 78 Rust tests/clippy and 23 web tests/build.
+- Local GIF transport is now enabled but renderer decodes only first frame through
+  `createImageBitmap` and converts it to PNG before display, preventing animation.
+  Full rendering fixture exposed PNG/JPEG/GIF/WebP/SVG entries in live WKWebView;
+  first-frame conversion has source regression coverage.
+- Latest checkpoint verified debug build, 78 Rust tests/clippy and 24 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 

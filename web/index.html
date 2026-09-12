@@ -130,14 +130,17 @@
             window.webkit?.messageHandlers?.mdvr?.postMessage(JSON.stringify(envelope));
           }
         };
-        window.mdvrResolveResource = (envelope) => {
+        window.mdvrResolveResource = async (envelope) => {
           const payload = envelope?.message?.kind === 'resource.result' ? envelope.message.payload : null;
           if (!payload || payload.document !== navigationContext?.document || payload.generation !== navigationContext?.generation) return;
           const placeholder = resourceElements.get(payload.resource);
           const value = payload.result?.bytes;
           if (!placeholder || !value || typeof value.mime !== 'string' || !Array.isArray(value.bytes)) return;
-          const url = window.mdvrCreateResourceUrl?.(value.mime, value.bytes);
-          if (!url) return;
+          const url = await window.mdvrCreateResourceUrl?.(value.mime, value.bytes);
+          if (!url || payload.document !== navigationContext?.document || payload.generation !== navigationContext?.generation) {
+            if (url) URL.revokeObjectURL(url);
+            return;
+          }
           const image = document.createElement('img');
           image.alt = placeholder.getAttribute('aria-label') || '';
           image.src = url;

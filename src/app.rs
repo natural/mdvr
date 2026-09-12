@@ -96,6 +96,7 @@ fn resource_mime(reference: &str) -> Option<String> {
             "png" => "image/png",
             "jpg" | "jpeg" => "image/jpeg",
             "webp" => "image/webp",
+            "gif" => "image/gif",
             "svg" => "image/svg+xml",
             _ => return None,
         }
@@ -1046,7 +1047,7 @@ mod tests {
             Some("image/svg+xml")
         );
         assert_eq!(resource_mime("photo.jpeg").as_deref(), Some("image/jpeg"));
-        assert_eq!(resource_mime("animated.gif"), None);
+        assert_eq!(resource_mime("animated.gif").as_deref(), Some("image/gif"));
         assert_eq!(resource_mime("payload.html"), None);
     }
 

@@ -39,6 +39,12 @@ test("bridge helper is no-op when WebKit handler is absent", () => {
   expect(script).toContain("catch {\n            return false;");
 });
 
+test("GIF resources are frozen to first PNG frame", () => {
+  expect(main).toContain('mime === "image/gif"');
+  expect(main).toContain("createImageBitmap");
+  expect(main).toContain('canvas.toBlob(resolve, "image/png")');
+});
+
 test("local images use context-bound native resource requests", () => {
   expect(html).toContain("kind: 'resource.request'");
   expect(html).toContain("reference: { relative_path: { value: reference } }");
