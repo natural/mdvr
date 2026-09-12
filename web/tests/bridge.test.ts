@@ -98,6 +98,13 @@ test("outline is generated safely from rendered headings", () => {
   expect(main).toContain("installOutline(model)");
 });
 
+test("source copy uses exact Markdown and restores focus selection", () => {
+  expect(html).toContain("data-copy-source");
+  expect(main).toContain("navigator.clipboard.writeText(current.source)");
+  expect(main).toContain("selection.getRangeAt(index).cloneRange()");
+  expect(main).toContain("active?.focus()");
+});
+
 test("code copy uses exact model source with clipboard fallback", () => {
   expect(main).toContain("model.codeBlocks[index]?.source");
   expect(main).toContain("navigator.clipboard.writeText(source)");

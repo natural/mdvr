@@ -27,6 +27,7 @@
       <button type="button" data-history="back" aria-label="Back" disabled>←</button>
       <button type="button" data-history="forward" aria-label="Forward" disabled>→</button>
       <button type="button" data-history="reload">Reload</button>
+      <button type="button" data-copy-source>Copy Markdown</button>
     </div>
     <select id="theme" aria-label="Reader theme">
       <option value="system">System</option>
@@ -52,7 +53,7 @@
           if (action.kind === 'text_scale') return Object.keys(action).length === 2 && ['increase', 'decrease', 'reset'].includes(action.payload);
           if (action.kind === 'history') return Object.keys(action).length === 2 && ['back', 'forward', 'reload'].includes(action.payload);
           if (action.kind === 'theme') return Object.keys(action).length === 2 && (['system', 'light', 'dark', 'import'].includes(action.payload) || (action.payload?.named && typeof action.payload.named.name === 'string')); 
-          if (action.kind === 'copy') return action.payload && Object.keys(action).length === 2 && action.payload.kind === 'code';
+          if (action.kind === 'copy') return action.payload && Object.keys(action).length === 2 && ['source', 'code', 'rendered'].includes(action.payload.kind);
           if (action.kind !== 'search' || !action.payload || Object.keys(action).length !== 2) return false;
           const { kind, payload } = action.payload;
           if (kind === 'next' || kind === 'previous') return Object.keys(action.payload).length === 1;
@@ -195,8 +196,12 @@
           else if (['system', 'light', 'dark'].includes(value)) payload = value;
           postNativeAction({ kind: 'theme', payload });
         });
-        document.querySelector('#history').addEventListener('click', (event) => {
+        document.querySelector('#history').addEventListener('click', async (event) => {
           if (!(event.target instanceof HTMLButtonElement)) return;
+          if (event.target.hasAttribute('data-copy-source')) {
+            if (await window.mdvrCopySource?.()) postNativeAction({ kind: 'copy', payload: { kind: 'source' } });
+            return;
+          }
           postNativeAction({ kind: 'history', payload: event.target.dataset.history });
         });
         const search = document.querySelector('#search');

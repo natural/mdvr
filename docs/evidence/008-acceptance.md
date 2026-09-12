@@ -143,7 +143,10 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   JSON picker; validated Zed families add safe named choices while arbitrary CSS/
   script values stay blocked. Imported `Safe dark` path/name persisted and restored
   after restart. Evidence: [imported theme](screenshots/imported-theme.png).
-- Latest checkpoint verified debug build, 78 Rust tests/clippy and 25 web tests/build.
+- Copy Markdown writes exact current source, with fallback restoring prior DOM
+  ranges and focus. Live `readme.md` copy pasted beginning `# mdvr` plus original
+  following prose. Evidence: [source copy](screenshots/source-copy.png).
+- Latest checkpoint verified debug build, 78 Rust tests/clippy and 26 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 
@@ -162,7 +165,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 
 The following remain unverified against a live embedded WKWebView: resize and
 clipping, automated picker text filtering and broader focus transitions,
-cross-block selection and rendered/source clipboard behavior, reload selection/locator
+cross-block selection and rendered-text clipboard behavior, reload selection/locator
 preservation, non-search action bridge execution, CSP enforcement, Mermaid async output,
 remote resource consent and automated dynamic system-appearance switching.
 

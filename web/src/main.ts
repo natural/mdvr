@@ -371,6 +371,34 @@ export function loadDocument(source: string, generation = 1): RenderModel {
     return model;
 }
 
+export async function copySource(): Promise<boolean> {
+    if (!current) return false;
+    try {
+        await navigator.clipboard.writeText(current.source);
+        return true;
+    } catch {
+        const active = document.activeElement as HTMLElement | null;
+        const selection = window.getSelection();
+        const ranges = selection
+            ? Array.from({ length: selection.rangeCount }, (_, index) =>
+                  selection.getRangeAt(index).cloneRange(),
+              )
+            : [];
+        const textarea = document.createElement("textarea");
+        textarea.value = current.source;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.append(textarea);
+        textarea.select();
+        const copied = document.execCommand("copy");
+        textarea.remove();
+        selection?.removeAllRanges();
+        ranges.forEach((range) => selection?.addRange(range));
+        active?.focus();
+        return copied;
+    }
+}
+
 export async function createResourceUrl(
     mime: string,
     bytes: number[],
@@ -404,5 +432,6 @@ Object.assign(window, {
     mdvrLoadDocument: loadDocument,
     mdvrSearchDocument: searchDocument,
     mdvrApplyAppearance: applyAppearance,
+    mdvrCopySource: copySource,
     mdvrCreateResourceUrl: createResourceUrl,
 });
