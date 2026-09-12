@@ -137,7 +137,9 @@
           const link = event.target.closest('a[href]');
           if (!link) return;
           const href = link.getAttribute('href');
-          if (href && postNativeNavigation(navigationTarget(href))) event.preventDefault();
+          if (!href) return;
+          const target = navigationTarget(href);
+          if (postNativeNavigation(target) && !target.anchor) event.preventDefault();
         });
         window.mdvrSetNavigationContext = (document, generation) => {
           navigationContext = document && generation ? { document, generation } : null;
@@ -177,7 +179,10 @@
           placeholder.replaceWith(image);
           resourceElements.delete(payload.resource);
         };
-        window.mdvrNavigateAnchor = (anchor) => document.getElementById(anchor)?.scrollIntoView();
+        window.mdvrNavigateAnchor = (anchor) => {
+          const target = document.getElementById(anchor);
+          if (target) window.scrollTo(0, target.getBoundingClientRect().top + window.scrollY);
+        };
         const announce = () => {};
         window.mdvrPostAction = postNativeAction;
         window.mdvrPostNavigation = postNativeNavigation;

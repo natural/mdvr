@@ -295,6 +295,14 @@ function installOutline(model: RenderModel) {
         link.href = `#${heading.id}`;
         link.textContent = heading.text;
         link.style.marginLeft = `${Math.max(0, heading.level - 1)}rem`;
+        link.addEventListener("click", () => {
+            const target = document.getElementById(heading.id);
+            if (target)
+                window.scrollTo(
+                    0,
+                    target.getBoundingClientRect().top + window.scrollY,
+                );
+        });
         outline.append(link);
     }
     toggle.hidden = model.headings.length === 0;
