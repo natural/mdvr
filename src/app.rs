@@ -150,6 +150,7 @@ struct MdvrView {
     bridge_task: Task<()>,
     resource_policy: Option<ResourcePolicy>,
     preferences: Preferences,
+    appearance_mode: Option<AppearanceMode>,
 }
 
 impl MdvrView {
@@ -175,6 +176,7 @@ impl MdvrView {
             bridge_task,
             resource_policy: None,
             preferences: Preferences::default(),
+            appearance_mode: None,
         };
         let context = view
             .navigation
@@ -218,26 +220,7 @@ impl MdvrView {
             });
         self.document_committed(context);
         self.save_preferences();
-        let mode = match window.appearance() {
-            WindowAppearance::Dark | WindowAppearance::VibrantDark => AppearanceMode::Dark,
-            WindowAppearance::Light | WindowAppearance::VibrantLight => AppearanceMode::Light,
-        };
-        if let Some(web_view) = self.web_view.as_mut()
-            && let Some(generation) = context.generation
-        {
-            match default_theme(mode)
-                .tokens
-                .with_scale(self.preferences.text_scale_percent)
-                .and_then(|tokens| tokens.as_revision_one())
-            {
-                Ok(appearance) => {
-                    if let Err(error) = web_view.apply_appearance(&appearance, generation) {
-                        eprintln!("mdvr: cannot apply appearance: {error}");
-                    }
-                }
-                Err(error) => eprintln!("mdvr: invalid saved appearance: {error}"),
-            }
-        }
+        self.update_appearance(window);
         if let Some(web_view) = self.web_view.as_ref() {
             web_view.sync_frame();
         }
@@ -261,6 +244,34 @@ impl MdvrView {
                 web_view.set_navigation_context(context.document, context.generation)
         {
             eprintln!("mdvr: cannot update renderer navigation context: {error}");
+        }
+    }
+
+    fn update_appearance(&mut self, window: &Window) {
+        let mode = match window.appearance() {
+            WindowAppearance::Dark | WindowAppearance::VibrantDark => AppearanceMode::Dark,
+            WindowAppearance::Light | WindowAppearance::VibrantLight => AppearanceMode::Light,
+        };
+        if self.appearance_mode == Some(mode) {
+            return;
+        }
+        let Some(generation) = self.bridge_context.generation else {
+            return;
+        };
+        let result = default_theme(mode)
+            .tokens
+            .with_scale(self.preferences.text_scale_percent)
+            .and_then(|tokens| tokens.as_revision_one());
+        match (self.web_view.as_mut(), result) {
+            (Some(web_view), Ok(appearance)) => {
+                match web_view.apply_appearance(&appearance, generation) {
+                    Ok(true) => self.appearance_mode = Some(mode),
+                    Ok(false) => {}
+                    Err(error) => eprintln!("mdvr: cannot apply appearance: {error}"),
+                }
+            }
+            (_, Err(error)) => eprintln!("mdvr: invalid saved appearance: {error}"),
+            _ => {}
         }
     }
 
@@ -504,10 +515,8 @@ impl Drop for MdvrView {
 }
 
 impl Render for MdvrView {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        // Keep shell state native-owned while the WebKit view remains the only
-        // interactive surface in this composition slice.
-        let _renderer_has_focus = self.shell.focus.owner() == FocusOwner::Renderer;
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.update_appearance(window);
         if let Some(web_view) = self.web_view.as_ref() {
             web_view.sync_frame();
         }
