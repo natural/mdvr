@@ -92,6 +92,8 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   it fixed native text while keeping platform defaults disabled. Live directory
   picker listed four Markdown files and opened `first.md`. Evidence:
   [picker](screenshots/picker.png), [opened document](screenshots/picker-open.png).
+  Native focus plus Down/Up and Return keyboard handling also passed: Down then
+  Return opened `image.md`. Evidence: [keyboard open](screenshots/picker-keyboard-open.png).
 - Latest checkpoint verified debug build, 75 Rust tests/clippy and 20 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
@@ -110,7 +112,7 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
 ## Unverified desktop behavior
 
 The following remain unverified against a live embedded WKWebView: resize and
-clipping, keyboard picker/filter and focus transitions, close/reopen and activation,
+clipping, picker text filtering and broader focus transitions, close/reopen and activation,
 cross-block selection and rendered/source clipboard behavior, reload selection/locator
 preservation, non-search action bridge execution, CSP enforcement, Mermaid async output,
 remote resource consent, dynamic system-appearance changes, imported themes, and

@@ -4,8 +4,8 @@ use std::{
 };
 
 use gpui::{
-    App, Application, Context, Render, Task, Timer, Window, WindowAppearance, WindowOptions, div,
-    prelude::*,
+    App, Application, Context, FocusHandle, KeyDownEvent, Render, Task, Timer, Window,
+    WindowAppearance, WindowOptions, div, prelude::*,
 };
 
 use crate::{
@@ -158,10 +158,12 @@ struct MdvrView {
     resource_policy: Option<ResourcePolicy>,
     preferences: Preferences,
     appearance_mode: Option<AppearanceMode>,
+    picker_focus: FocusHandle,
 }
 
 impl MdvrView {
     fn new(shell: ShellState, navigation: NavigationState, cx: &mut Context<Self>) -> Self {
+        let picker_focus = cx.focus_handle();
         let bridge_task = cx.spawn(async move |view, cx| {
             loop {
                 Timer::after(Duration::from_millis(16)).await;
@@ -185,6 +187,7 @@ impl MdvrView {
             resource_policy: None,
             preferences: Preferences::default(),
             appearance_mode: None,
+            picker_focus,
         };
         let context = view
             .navigation
@@ -197,12 +200,13 @@ impl MdvrView {
         view
     }
 
-    fn initialize(&mut self, window: &Window, launch: &LaunchPlan, cx: &mut Context<Self>) {
+    fn initialize(&mut self, window: &mut Window, launch: &LaunchPlan, cx: &mut Context<Self>) {
         self.preferences = conventional_path()
             .map(|path| load_or_default(&path).preferences)
             .unwrap_or_default();
         if launch.state.document.is_none() {
             self.start_discovery(cx);
+            window.focus(&self.picker_focus);
             return;
         }
         let Some(mut web_view) = EmbeddedWebView::attach(window) else {
@@ -285,6 +289,36 @@ impl MdvrView {
                 }
             }
         }));
+    }
+
+    fn handle_picker_key(&mut self, event: &KeyDownEvent, window: &Window, cx: &mut Context<Self>) {
+        match event.keystroke.key.as_str() {
+            "up" | "arrowup" => self.shell.picker.move_selection(-1),
+            "down" | "arrowdown" => self.shell.picker.move_selection(1),
+            "enter" => {
+                if let Some(path) = self.shell.picker.selected().map(str::to_owned) {
+                    self.open_picker_document(path, window, cx);
+                }
+                return;
+            }
+            "backspace" => {
+                let mut query = self.shell.picker.query().to_owned();
+                query.pop();
+                self.shell.picker.set_query(query);
+            }
+            "escape" => self.shell.picker.set_query(""),
+            _ => {
+                let Some(text) = event.keystroke.key_char.as_deref().filter(|text| {
+                    !text.is_empty() && text.chars().all(|character| !character.is_control())
+                }) else {
+                    return;
+                };
+                let mut query = self.shell.picker.query().to_owned();
+                query.push_str(text);
+                self.shell.picker.set_query(query);
+            }
+        }
+        cx.notify();
     }
 
     fn open_picker_document(&mut self, relative: String, window: &Window, cx: &mut Context<Self>) {
@@ -615,10 +649,16 @@ impl Render for MdvrView {
         self.update_appearance(window);
         if let Some(web_view) = self.web_view.as_ref() {
             web_view.sync_frame();
-            return div().size_full();
+            return div().size_full().into_any_element();
         }
+        let selected = self.shell.picker.selected().map(str::to_owned);
         let entries = self.shell.picker.visible();
         div()
+            .id("picker")
+            .track_focus(&self.picker_focus)
+            .on_key_down(cx.listener(|view, event, window, cx| {
+                view.handle_picker_key(event, window, cx);
+            }))
             .size_full()
             .flex()
             .flex_col()
@@ -634,11 +674,17 @@ impl Render for MdvrView {
             )
             .child(
                 div()
+                    .text_color(gpui::rgb(0xb0b3b8))
+                    .child(format!("Filter: {}", self.shell.picker.query())),
+            )
+            .child(
+                div()
                     .id("picker-list")
                     .flex_1()
                     .overflow_y_scroll()
                     .children(entries.into_iter().enumerate().map(|(index, entry)| {
                         let path = entry.relative_path;
+                        let is_selected = selected.as_deref() == Some(path.as_str());
                         div()
                             .id(("picker-entry", index))
                             .px_3()
@@ -646,6 +692,7 @@ impl Render for MdvrView {
                             .rounded_sm()
                             .cursor_pointer()
                             .hover(|style| style.bg(gpui::rgb(0x303134)))
+                            .when(is_selected, |style| style.bg(gpui::rgb(0x3c4043)))
                             .text_color(gpui::rgb(0xffffff))
                             .child(path.clone())
                             .on_click(cx.listener(move |view, _, window, cx| {
@@ -657,6 +704,7 @@ impl Render for MdvrView {
                 self.shell.picker.status().is_some() && self.shell.picker.visible().is_empty(),
                 |view| view.child("No Markdown files found"),
             )
+            .into_any_element()
     }
 }
 
