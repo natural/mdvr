@@ -1,0 +1,40 @@
+#!/bin/sh
+set -eu
+
+usage() {
+    printf '%s\n' 'Usage: mdvr [PATH]' '' 'Open one Markdown file or browse one directory in mdvr.' '' 'Options:' '  --help       Show this help' '  --version    Show version'
+}
+
+[ "$#" -le 1 ] || { usage >&2; exit 2; }
+case ${1-} in
+--help) usage; exit 0 ;;
+--version) printf '%s\n' 'mdvr 0.1.0'; exit 0 ;;
+-*) printf 'mdvr: unsupported input: %s\n' "$1" >&2; exit 2 ;;
+esac
+
+app=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
+[ -d "$app" ] || { printf 'mdvr: app bundle missing: %s\n' "$app" >&2; exit 1; }
+if [ "$#" -eq 0 ]; then
+    /usr/bin/open -a "$app"
+    printf 'mdvr: accepted Dock launch\n'
+    exit 0
+fi
+
+input=$1
+[ -e "$input" ] || { printf 'mdvr: path does not exist: %s\n' "$input" >&2; exit 2; }
+if [ -f "$input" ]; then
+    case $input in
+    *.[mM][dD] | *.[mM][aA][rR][kK][dD][oO][wW][nN]) ;;
+    *) printf 'mdvr: unsupported file: %s\n' "$input" >&2; exit 2 ;;
+    esac
+    [ -r "$input" ] || { printf 'mdvr: file is unreadable: %s\n' "$input" >&2; exit 2; }
+    bytes=$(stat -f %z "$input")
+    [ "$bytes" -le 20971520 ] || { printf 'mdvr: file exceeds 20 MiB: %s\n' "$input" >&2; exit 2; }
+    iconv -f UTF-8 -t UTF-8 "$input" >/dev/null 2>&1 || { printf 'mdvr: file is not UTF-8 Markdown: %s\n' "$input" >&2; exit 2; }
+elif [ ! -d "$input" ]; then
+    printf 'mdvr: unsupported path: %s\n' "$input" >&2
+    exit 2
+fi
+resolved=$(cd "$(dirname "$input")" && pwd -P)/$(basename "$input")
+/usr/bin/open -a "$app" "$resolved"
+printf 'mdvr: accepted %s\n' "$resolved"

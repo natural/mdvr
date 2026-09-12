@@ -73,15 +73,16 @@ if $dry_run; then
 fi
 
 rm -rf "$app"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/web"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/web" "$app/Contents/Resources/bin"
 sh "$root/packaging/build-icon.sh" "$root/packaging/build/AppIcon.icns"
 cp "$binary" "$app/Contents/MacOS/mdvr"
 cp "$plist" "$app/Contents/Info.plist"
 cp "$root/packaging/build/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
+cp "$root/packaging/mdvr-cli" "$app/Contents/Resources/bin/mdvr"
 cp -R "$web_dist/." "$app/Contents/Resources/web/"
-chmod 755 "$app/Contents/MacOS/mdvr"
 find "$app/Contents" -type d -exec chmod 755 {} +
 find "$app/Contents/Resources" -type f -exec chmod 644 {} +
+chmod 755 "$app/Contents/MacOS/mdvr" "$app/Contents/Resources/bin/mdvr"
 find "$app" -exec touch -t 200001010000 {} +
 
 sh "$root/packaging/inspect-app.sh" "$app"

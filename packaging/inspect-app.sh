@@ -24,10 +24,13 @@ esac
 
 contents="$app/Contents"
 main="$contents/MacOS/mdvr"
+launcher="$contents/Resources/bin/mdvr"
 plist="$contents/Info.plist"
 [ -d "$contents" ] || fail "Contents directory missing"
 [ -f "$main" ] || fail "main executable missing: $main"
 [ -x "$main" ] || fail "main executable is not executable: $main"
+[ -x "$launcher" ] || fail "CLI launcher missing or not executable: $launcher"
+[ "$($launcher --version)" = "mdvr 0.1.0" ] || fail "CLI launcher version failed"
 [ -f "$plist" ] || fail "Info.plist missing: $plist"
 
 symlink=$(find "$app" -type l -print -quit)

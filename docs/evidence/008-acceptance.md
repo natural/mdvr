@@ -126,6 +126,9 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   opened `space doc.md`, with one PID/window throughout. Evidence:
   [Finder reuse](screenshots/finder-reuse.png). After closing that window, Dock
   reopen loaded latest persisted `space doc.md`, not original process launch path.
+  Bundled CLI now validates path/type/readability/UTF-8/size then delegates through
+  LaunchServices. Two CLI opens acknowledged absolute paths, reused one PID/window,
+  and second visibly replaced first; invalid paths exit 2 before dispatch.
 - Hostile live fixture strips scripts, event handlers, CSS, frames, forms and
   orphan form inputs. Local SVG bytes now pass renderer SVG sanitizer before Blob
   creation, removing scripts, handlers and every href/xlink external reference.

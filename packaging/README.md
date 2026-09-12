@@ -31,8 +31,13 @@ Explicit CLI installation remains manual and does not edit shell configuration:
 
 ```sh
 mkdir -p "$HOME/.local/bin"
-install -m 755 packaging/build/mdvr.app/Contents/MacOS/mdvr "$HOME/.local/bin/mdvr"
+ln -s /Applications/mdvr.app/Contents/Resources/bin/mdvr "$HOME/.local/bin/mdvr"
 ```
+
+Bundled CLI delegates through macOS LaunchServices, so repeated CLI/Finder/Dock
+opens reuse running app. It validates argument count, path existence/readability,
+Markdown extension, UTF-8, and 20 MiB hard ceiling before reporting acceptance. Symlink it only after placing
+`mdvr.app` in `/Applications`; no shell profile is edited.
 
 `build-app.sh` fails closed unless macOS tools, the release `target/release/mdvr`
 binary, `web/dist/index.html`, and valid `Info.plist` exist. It rejects non-Mach-O
