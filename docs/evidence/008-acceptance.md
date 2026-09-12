@@ -221,7 +221,9 @@ single-code-block fixture across five cold process launches: 411.2, 426.2, 435.1
 and universal builds are blocked by available arm64-only target/toolchain. Unsigned arm64 app and compressed DMG were built;
 read-only DMG mount passed full bundle/Mach-O/framework/icon inspection. Original
 project icon is generated into ICNS. Bundle minimum macOS 11.0 matches release
-Mach-O `LC_BUILD_VERSION` and is enforced by inspection. No clean-machine test,
+Mach-O `LC_BUILD_VERSION` and is enforced by inspection. Deterministic notices
+include license text for all 124 installed web packages and are bundled with
+project license; final legal review remains external. No clean-machine test,
 signing, notarization, or Gatekeeper evidence exists.
 
 Signing/notarization credentials and packaging environment were not created or

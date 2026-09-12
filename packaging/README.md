@@ -45,8 +45,9 @@ or non-arm64 binaries and web-asset symlinks. It replaces only
 `packaging/build/mdvr.app`, then normalizes copied timestamps to `2000-01-01
 00:00:00 UTC`.
 
-`inspect-app.sh` validates bundle metadata, Markdown file associations, absence
-of custom URL schemes, bundled web assets, symlinks, and every embedded Mach-O
+`inspect-app.sh` validates bundle metadata, Markdown file associations, project
+license and complete generated third-party notices, absence of custom URL schemes,
+bundled web assets, symlinks, and every embedded Mach-O
 file with `file`, `lipo`, and `otool -L`. Current bundle has no embedded
 frameworks; linked system frameworks are printed for inspection.
 `build-dmg.sh` creates a compressed HFS+ image; `check-dmg.sh` mounts it read-only

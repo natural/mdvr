@@ -24,10 +24,9 @@ and `@types/dompurify` 3.2.0 (MIT). They are not renderer runtime assets.
 
 Mermaid brings its own locked runtime dependency graph, including parser,
 Chevrotain, D3, Cytoscape, ELK, KaTeX, and DOMPurify packages. Their versions,
-integrity hashes, and dependency relationships are recorded in `bun.lock`;
-their individual license texts and notice requirements still need a release
-notice generation pass. No package license expression is being treated as a
-blanket license for transitive content.
+integrity hashes, and dependency relationships are recorded in `bun.lock`.
+`THIRD_PARTY_NOTICES.md` deterministically inventories 124 installed packages
+and includes every discovered license/notice text with zero missing files.
 
 ## Bundling and network facts
 
@@ -45,9 +44,8 @@ blanket license for transitive content.
 
 ## Unverified obligations and release blockers
 
-- Exact notices/copyright attribution for every transitive package in the
-  resolved Mermaid graph are not yet generated. Run an approved license
-  inventory against final `bun.lock` before distribution.
+- Generated notices require final human/legal review before public distribution;
+  generation and package metadata are evidence, not legal advice.
 - Package metadata and repository license files were inspected, but this is not
   independent legal verification of source provenance, optional package files,
   or bundled output obligations.
@@ -63,6 +61,8 @@ cd web
 bun install --frozen-lockfile
 bun test tests
 bun run build
+cd ..
+bun scripts/verify/generate-notices.mjs
 ```
 
 Inspect resolved metadata and license files before release:

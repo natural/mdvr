@@ -78,6 +78,8 @@ sh "$root/packaging/build-icon.sh" "$root/packaging/build/AppIcon.icns"
 cp "$binary" "$app/Contents/MacOS/mdvr"
 cp "$plist" "$app/Contents/Info.plist"
 cp "$root/packaging/build/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
+cp "$root/license" "$app/Contents/Resources/LICENSE"
+cp "$root/THIRD_PARTY_NOTICES.md" "$app/Contents/Resources/THIRD_PARTY_NOTICES.md"
 cp "$root/packaging/mdvr-cli" "$app/Contents/Resources/bin/mdvr"
 cp -R "$web_dist/." "$app/Contents/Resources/web/"
 find "$app/Contents" -type d -exec chmod 755 {} +
