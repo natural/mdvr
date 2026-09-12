@@ -225,6 +225,62 @@ export function applyAppearance(value: unknown): boolean {
 const gate = new GenerationGate();
 let current: RenderModel | null = null;
 
+function captureView() {
+    const block = Array.from(
+        root.querySelectorAll<HTMLElement>("[data-block-id]"),
+    ).find((element) => element.getBoundingClientRect().bottom > 0);
+    return {
+        block: block?.dataset.blockId,
+        top: block?.getBoundingClientRect().top ?? 0,
+        selection: window.getSelection()?.toString() ?? "",
+    };
+}
+
+function restoreView(view: ReturnType<typeof captureView>) {
+    if (view.block) {
+        const block = root.querySelector<HTMLElement>(
+            `[data-block-id="${CSS.escape(view.block)}"]`,
+        );
+        if (block)
+            window.scrollBy(0, block.getBoundingClientRect().top - view.top);
+    }
+    if (!view.selection) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodes: Text[] = [];
+    let text = "";
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        nodes.push(node as Text);
+        text += node.textContent ?? "";
+    }
+    const start = text.indexOf(view.selection);
+    if (start < 0) return;
+    let offset = 0;
+    let startNode: Text | undefined;
+    let endNode: Text | undefined;
+    let startOffset = 0;
+    let endOffset = 0;
+    for (const node of nodes) {
+        const length = node.data.length;
+        if (!startNode && start <= offset + length) {
+            startNode = node;
+            startOffset = start - offset;
+        }
+        if (start + view.selection.length <= offset + length) {
+            endNode = node;
+            endOffset = start + view.selection.length - offset;
+            break;
+        }
+        offset += length;
+    }
+    if (!startNode || !endNode) return;
+    const range = document.createRange();
+    range.setStart(startNode, startOffset);
+    range.setEnd(endNode, endOffset);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+}
+
 function installOutline(model: RenderModel) {
     const outline = document.querySelector<HTMLElement>("#outline");
     const toggle = document.querySelector<HTMLButtonElement>("#outline-toggle");
@@ -297,9 +353,11 @@ async function finishMermaid(
 
 export function loadDocument(source: string, generation = 1): RenderModel {
     gate.begin(generation);
+    const view = captureView();
     const model = renderDocument(source, { generation });
     current = model;
     mountDocument(root, model);
+    restoreView(view);
     installOutline(model);
     installCodeCopy(model);
     (

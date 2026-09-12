@@ -55,6 +55,13 @@ test("document search is keyboard accessible and wraps", () => {
   expect(html).toContain("event.key === 'Escape'");
 });
 
+test("reload restores visible block and unchanged selection", () => {
+  expect(main).toContain("const view = captureView()");
+  expect(main).toContain("restoreView(view)");
+  expect(main).toContain("CSS.escape(view.block)");
+  expect(main).toContain("text.indexOf(view.selection)");
+});
+
 test("outline is generated safely from rendered headings", () => {
   expect(html).toContain('aria-label="Document outline"');
   expect(main).toContain("for (const heading of model.headings)");

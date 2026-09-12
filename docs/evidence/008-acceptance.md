@@ -82,7 +82,11 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   heading IDs. Live outline expanded with `mdvr` and `Development`; selecting
   `Development` drove validated anchor navigation and changed scroll position.
   Evidence: [outline](screenshots/outline.png).
-- Latest checkpoint verified debug build, 75 Rust tests/clippy and 19 web tests/build.
+- Reload now captures first visible stable block plus viewport offset and exact
+  selection text before DOM replacement, restores matching block offset, and
+  recreates unchanged selection across text nodes without moving focus. Source
+  regression check exists; live scrolled/selection evidence remains open.
+- Latest checkpoint verified debug build, 75 Rust tests/clippy and 20 web tests/build.
   Release/package checks above predate these latest native changes; existing
   generated package is not evidence for the current source.
 
