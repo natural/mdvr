@@ -1,8 +1,9 @@
 # mdvr
 
-Read-only macOS Markdown viewer. GPUI + embedded WKWebView design; currently only
-build bootstrap, not a functional viewer. See [design](docs/design.md) and
-[implementation sequence](docs/001-foundation-and-feasibility.md).
+Read-only macOS Markdown viewer built with GPUI and embedded WKWebView. Markdown,
+GFM, syntax highlighting, Mermaid, KaTeX, local images, document search, outline,
+exact code copy, relative navigation, live reload, appearance, and bounded native
+resource policy run fully offline.
 
 ## Development
 
@@ -14,23 +15,26 @@ macOS target. Full Xcode is required for GPUI's Metal shaders. If Metal is missi
 xcodebuild -downloadComponent MetalToolchain
 ```
 
-Build/check from repository root:
+Build and run:
 
 ```sh
-cargo build --locked
+(cd web && bun install --frozen-lockfile && bun run build)
+cargo run --locked -- readme.md
+```
+
+Verify:
+
+```sh
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
-(cd web && bun install --frozen-lockfile && bun run build)
+(cd web && bun test tests && bun run build)
+swift scripts/verify/check-renderer.swift web/dist/index.html
+scripts/verify/check-packaging.sh
 ```
 
-`cargo run --locked` opens the GPUI bootstrap window. Web output in `web/dist/`
-is currently separate; WKWebView embedding is plan 001. No application tests yet;
-Cargo's zero-test result is only a build check. No web dependencies means Bun
-currently emits no lockfile; commit it when dependencies are added.
-
-Keep `Cargo.lock` tracked. Only integration owner changes dependencies and shared
-build files. Rustup is not required for the installed host toolchain; universal
-build setup must add/prove Intel target support in plans 001/008. Signing and
-notarization credentials remain unconfirmed. See numbered plans for parallel
-ownership, contract gates, acceptance and release requirements.
+`Cargo.lock` and `web/bun.lock` stay tracked. Current packaging creates an unsigned
+arm64 development app. Universal builds require an installed Intel Rust target;
+signing and notarization require Apple credentials. See [design](docs/design.md),
+[numbered implementation plans](docs/001-foundation-and-feasibility.md), and
+[acceptance evidence](docs/evidence/008-acceptance.md).
