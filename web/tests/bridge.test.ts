@@ -68,7 +68,7 @@ test("narrow layout hides outline and keeps toolbar clear of content", () => {
 
 test("scrollbar visibility supports hide, show, and scroll modes", () => {
   expect(html).toContain("window.mdvrSetScrollbarVisibility");
-  expect(html).toContain('data-scrollbar="hide"');
+  expect(html).toContain('mode === "hide"');
   expect(html).toContain('"show-on-scroll"');
 });
 

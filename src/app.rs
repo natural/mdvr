@@ -1889,6 +1889,7 @@ fn show_preferences(_: &ShowPreferences, cx: &mut App) {
                 origin: point(px(300.0), px(200.0)),
                 size: size(px(420.0), px(280.0)),
             })),
+            is_resizable: true,
             ..WindowOptions::default()
         },
         move |_, cx| {
@@ -1964,6 +1965,7 @@ fn open_mdvr_window(cx: &mut App, launch: LaunchPlan, announce: bool) {
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: None,
+            is_resizable: true,
             ..WindowOptions::default()
         },
         move |_window, cx| {
