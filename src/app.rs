@@ -12,9 +12,21 @@ use std::{
 };
 
 use gpui::{
-    App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Render, Task, Timer, Window,
-    WindowAppearance, WindowBounds, WindowOptions, div, point, prelude::*, px, size,
+    App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Menu, MenuItem, Render,
+    SystemMenuType, Task, Timer, Window, WindowAppearance, WindowBounds, WindowOptions, actions,
+    div, point, prelude::*, px, size,
 };
+
+actions!(
+    mdvr,
+    [
+        OpenFileAction,
+        OpenFolderAction,
+        ShowPreferences,
+        QuitApp,
+        AboutMdvr
+    ]
+);
 
 use crate::{
     LaunchPlan,
@@ -1581,6 +1593,166 @@ impl Render for MdvrView {
     }
 }
 
+struct PreferencesView {
+    preferences: Preferences,
+    status: Option<String>,
+}
+
+impl PreferencesView {
+    fn save(&mut self) {
+        let Some(path) = conventional_path() else {
+            self.status = Some("Preferences path unavailable".into());
+            return;
+        };
+        self.status = Some(match save(&path, &self.preferences) {
+            Ok(()) => "Saved".into(),
+            Err(error) => format!("Save failed: {error}"),
+        });
+    }
+
+    fn adjust_scale(&mut self, delta: i16) {
+        let next = (i32::from(self.preferences.text_scale_percent) + i32::from(delta))
+            .clamp(50, 300) as u16;
+        let _ = self.preferences.set_text_scale(next);
+        self.save();
+    }
+
+    fn cycle_theme(&mut self) {
+        self.preferences.theme = match self.preferences.theme.as_deref() {
+            None => Some("light".into()),
+            Some("light") => Some("dark".into()),
+            _ => None,
+        };
+        self.save();
+    }
+}
+
+impl Render for PreferencesView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = self.preferences.theme.as_deref().unwrap_or("system");
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .p_6()
+            .bg(gpui::rgb(0x202124))
+            .text_color(gpui::rgb(0xf1f3f4))
+            .child(div().text_xl().child("Preferences"))
+            .child(div().child(format!("Theme: {theme}")))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(format!(
+                        "Text scale: {}%",
+                        self.preferences.text_scale_percent
+                    ))
+                    .child(
+                        div()
+                            .id("preferences-scale-down")
+                            .px_2()
+                            .py_1()
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .bg(gpui::rgb(0x3c4043))
+                            .child("−")
+                            .on_click(cx.listener(|view, _, _, _| view.adjust_scale(-10))),
+                    )
+                    .child(
+                        div()
+                            .id("preferences-scale-up")
+                            .px_2()
+                            .py_1()
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .bg(gpui::rgb(0x3c4043))
+                            .child("+")
+                            .on_click(cx.listener(|view, _, _, _| view.adjust_scale(10))),
+                    ),
+            )
+            .child(
+                div()
+                    .id("preferences-theme")
+                    .px_3()
+                    .py_2()
+                    .rounded_sm()
+                    .cursor_pointer()
+                    .bg(gpui::rgb(0x3c4043))
+                    .child("Cycle theme")
+                    .on_click(cx.listener(|view, _, _, _| view.cycle_theme())),
+            )
+            .child(
+                self.status
+                    .clone()
+                    .unwrap_or_else(|| "Changes save automatically".into()),
+            )
+    }
+}
+
+fn active_mdvr_window(cx: &mut App) -> Option<gpui::WindowHandle<MdvrView>> {
+    cx.active_window()
+        .and_then(|window| window.downcast::<MdvrView>())
+        .or_else(|| {
+            cx.windows()
+                .into_iter()
+                .find_map(|window| window.downcast::<MdvrView>())
+        })
+}
+
+fn open_file_action(_: &OpenFileAction, cx: &mut App) {
+    let Some(path) = choose_markdown_file() else {
+        return;
+    };
+    let Some(window) = active_mdvr_window(cx) else {
+        return;
+    };
+    let _ = window.update(cx, |view, _, cx| {
+        view.pending_open.push_back(OpenRequest { path, ack: None });
+        cx.notify();
+    });
+}
+
+fn open_folder_action(_: &OpenFolderAction, cx: &mut App) {
+    let Some(path) = choose_directory() else {
+        return;
+    };
+    let Some(window) = active_mdvr_window(cx) else {
+        return;
+    };
+    let _ = window.update(cx, |view, _, cx| view.open_directory(path, cx));
+}
+
+fn show_preferences(_: &ShowPreferences, cx: &mut App) {
+    let preferences = conventional_path()
+        .map(|path| load_or_default(&path).preferences)
+        .unwrap_or_default();
+    let _ = cx.open_window(
+        WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: point(px(300.0), px(200.0)),
+                size: size(px(420.0), px(280.0)),
+            })),
+            ..WindowOptions::default()
+        },
+        move |_, cx| {
+            cx.new(|_| PreferencesView {
+                preferences,
+                status: None,
+            })
+        },
+    );
+}
+
+fn quit_app(_: &QuitApp, cx: &mut App) {
+    cx.quit();
+}
+
+fn about_mdvr(_: &AboutMdvr, _cx: &mut App) {
+    eprintln!("mdvr {}", env!("CARGO_PKG_VERSION"));
+}
+
 pub(crate) fn dock_launch(fallback: &LaunchPlan) -> LaunchPlan {
     let preferences = conventional_path()
         .map(|path| load_or_default(&path).preferences)
@@ -1681,7 +1853,33 @@ pub fn run(launch: LaunchPlan) {
             open_mdvr_window(cx, dock_launch(&reopen_launch), false);
         }
     });
-    application.run(move |cx: &mut App| open_mdvr_window(cx, launch, true));
+    application.run(move |cx: &mut App| {
+        cx.on_action(open_file_action);
+        cx.on_action(open_folder_action);
+        cx.on_action(show_preferences);
+        cx.on_action(quit_app);
+        cx.on_action(about_mdvr);
+        cx.set_menus(vec![
+            Menu {
+                name: "mdvr".into(),
+                items: vec![
+                    MenuItem::action("About mdvr", AboutMdvr),
+                    MenuItem::action("Preferences…", ShowPreferences),
+                    MenuItem::os_submenu("Services", SystemMenuType::Services),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit mdvr", QuitApp),
+                ],
+            },
+            Menu {
+                name: "File".into(),
+                items: vec![
+                    MenuItem::action("Open File…", OpenFileAction),
+                    MenuItem::action("Open Folder…", OpenFolderAction),
+                ],
+            },
+        ]);
+        open_mdvr_window(cx, launch, true);
+    });
 }
 
 #[cfg(test)]
