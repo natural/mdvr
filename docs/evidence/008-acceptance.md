@@ -2,17 +2,23 @@
 
 Status: **candidate checks pass; release gate remains open**.
 
+Wry migration note: evidence below predates the Wry host migration unless it
+explicitly names Wry. Standalone WKWebView probes and old delegate observations
+are historical regression evidence, not proof of current GPUI/Wry integration.
+Current implementation uses Wry custom-protocol assets, Wry IPC, incognito mode,
+and Wry page-load readiness; a live Wry probe remains required.
+
 ## Automated checks
 
 Run from the repository root on the documented arm64 macOS host:
 
 ```text
 cargo fmt --check                                      passed
-cargo test --locked                                    passed (72 tests)
-cargo clippy --frozen --all-targets -- -D warnings     passed
+cargo test --locked                                    passed (88 tests)
+cargo clippy --locked --all-targets -- -D warnings     passed
 sh scripts/verify/check-fixtures.sh                   passed
-cd web && bun install --frozen-lockfile                passed (134 packages)
-cd web && bun test tests                               passed (15 tests)
+cd web && bun install --frozen-lockfile                passed (135 packages)
+cd web && bun test tests                               passed (36 tests)
 cd web && bun run build                                passed
 cargo build --release --locked                         passed
 sh scripts/verify/check-packaging.sh                  passed
@@ -31,10 +37,9 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   Native diagnostics confirmed attachment aborted because runtime lookup of
   `WKScriptMessageHandler` protocol metadata returned absent. Callback classes
   now register required selectors without requiring optional protocol metadata.
-- Fix: native loader now prefers packaged `Contents/Resources/web`, falls back
-  to checkout `web/dist`, and calls SDK-verified
-  `loadFileURL:allowingReadAccessToURL:`. Navigation allows only exact bundled
-  `index.html`; packaging rejects symlinks and network references.
+- Fix: Wry loader prefers packaged `Contents/Resources/web`, falls back to
+  checkout `web/dist`, serves assets through `mdvr://localhost`, and rejects
+  traversal/symlink escapes. Navigation allows only exact bundled `index.html`.
 - Path-selection tests cover packaged precedence, dev fallback, and exact
   navigation allowlist. `bun run build`, native checks, and package inspection
   verify bundle presence and local production module selection.
@@ -54,9 +59,10 @@ upstream future-incompatibility notices for `block` and `proc-macro-error2`.
   paragraphs, and code blocks on macOS 26.7 (25G229), arm64. Evidence:
   [rendered readme](screenshots/readme-rendered.png). This uses native code from
   checkpoint `1d3b443` plus the classic-script build fix.
-- Source is queued until `didFinishNavigation`. Regression tests cover callback
-  class registration and latest-generation pending-source drain. The queue write
-  now executes in release builds too, rather than only inside `debug_assert!`.
+- Wry source/state updates queue until its page-load callback sets readiness;
+  GPUI bridge polling drains pending state once. Unit tests cover latest-generation
+  pending-source behavior, protocol traversal/symlink rejection, and exact URL
+  navigation policy. Live Wry readiness remains an open evidence item.
 - Live revision-1 navigation bridge acceptance passed: clicking a relative
   Markdown link changed `First` to `Second`; editing that second file then changed
   the visible heading to `Second Reloaded`. This also verifies bridge polling and

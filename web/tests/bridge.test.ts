@@ -29,13 +29,12 @@ test("navigation bridge has no renderer authority", () => {
   expect(html).not.toContain("readFile");
 });
 
-test("bridge helper is no-op when WebKit handler is absent", () => {
+test("bridge helper is no-op when native IPC is absent", () => {
+  expect(script).toContain("const wry = window.ipc?.postMessage;");
   expect(script).toContain(
-    "const handler = window.webkit?.messageHandlers?.mdvr;",
+    "const webkit = window.webkit?.messageHandlers?.mdvr?.postMessage;",
   );
-  expect(script).toContain(
-    "if (!handler || typeof handler.postMessage !== 'function') return false;",
-  );
+  expect(script).toContain("if (typeof post !== 'function') return false;");
   expect(script).toContain(
     "if (!validBridgeAction(action) || !navigationContext) return false;",
   );

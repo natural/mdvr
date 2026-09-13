@@ -143,6 +143,10 @@ impl BridgeRouter {
         Ok(())
     }
 
+    pub(crate) fn clear(&mut self) {
+        self.queue.clear();
+    }
+
     pub(crate) fn set_context(&mut self, context: BridgeContext) {
         if context != self.context {
             self.queue.clear();

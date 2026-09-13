@@ -13,9 +13,10 @@ wiring of every D/R/N/U requirement. Other owners fix their own files.
   --version, reject unsupported/multiple inputs, reuse running app's single window.
   Finder root is file parent; Dock restoration differs from bare CLI picker intent.
   Test IPC ownership/validation, concurrent requests, timeout and app startup failure.
-- Own WKWebView lifetime, trusted bundled assets, nonpersistent data store,
-  CSP/navigation delegates and validated bridge. Block automatic navigation,
-  subframes/forms/objects and unapproved schemes; do not grant directory-wide file://.
+- Own Wry WebView lifetime, trusted bundled assets, nonpersistent data store,
+  custom-protocol/navigation handlers, and validated IPC bridge. Block automatic
+  navigation, subframes/forms/objects and unapproved schemes; do not grant
+  directory-wide file://.
 - Broker resources with canonical-root checks after symlink resolution, bounded
   bytes and opaque identities. Outside-root permission is one approved resource
   for current document session. Revoke permissions and pending work on navigation.

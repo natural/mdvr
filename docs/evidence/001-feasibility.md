@@ -11,17 +11,13 @@ deterministic document fixture. Fixture is not a Markdown parser and does not
 claim production rendering.
 
 - `src/app.rs` opens one GPUI window and owns one embedded view.
-- `src/platform/mod.rs` obtains GPUI's AppKit `NSView`, creates `WKWebView`
-  through the Objective-C runtime, uses `WKWebsiteDataStore`'s
-  `nonPersistentDataStore`, loads production `web/dist` assets from the
-  packaged `Contents/Resources/web` directory or dev-checkout fallback, and
-  sets width/height autoresizing.
-- Native delegate class conforms to `WKNavigationDelegate` and implements the
-  SDK-documented `webView:decidePolicyForNavigationAction:decisionHandler:`
-  selector. It cancels every navigation action. No unsupported selector is
-  used.
-- Delegate lifetime is retained by `EmbeddedWebView`; the weak WebKit delegate
-  property is cleared before both native objects are released.
+- `src/platform/mod.rs` obtains GPUI's AppKit `NSView` and builds a Wry child
+  WebView backed by macOS WebKit. Wry owns IPC, navigation policy, asset
+  loading, and JavaScript evaluation; production `web/dist` assets come from
+  packaged `Contents/Resources/web` or dev-checkout fallback.
+- Wry owns navigation policy and child-WebView lifetime. The native host allows
+  only `mdvr://localhost/index.html`; Wry cancels other top-level navigations.
+  Wry incognito mode selects macOS's nonpersistent data store.
 - No `WKScriptMessageHandler` or other JS/native message handler is registered;
   bridge surface is closed for this slice.
 - `web/index.html` contains static HTML, code, Mermaid, and TeX placeholder
@@ -31,8 +27,9 @@ claim production rendering.
 - Fixture JS provides literal case-insensitive section search with next/previous
   and Enter/Shift-Enter, code selection, and copy attempts with a host/clipboard
   failure status. It does not parse or render document formats.
-- Cargo pins direct macOS bindings to `block = 0.1.6`, `cocoa = 0.26.0`,
-  `objc = 0.2.7`, and `raw-window-handle = 0.6.2`; `Cargo.lock` is updated.
+- Cargo pins Wry-backed macOS bindings to `wry = 0.57.0`, `block2 = 0.6.2`,
+  `cocoa = 0.26.0`, `objc = 0.2.7`, and `raw-window-handle = 0.6.2`;
+  `Cargo.lock` is updated.
 
 ## API inspection
 
@@ -88,20 +85,20 @@ cd web && bun run build
 ```
 
 The Cargo warning is upstream future-incompatibility reporting, not an
-application warning. Source compilation verifies Objective-C method signatures
-and linkage. It does not prove delegate callback execution.
+application warning. Wry owns WebKit bindings and callbacks; source compilation
+does not prove GPUI child-WebView runtime behavior.
 
 ## Implemented checks vs unverified checks
 
 | Check | Current evidence | Status |
 | --- | --- | --- |
-| Offline production bundle is loaded | `loadFileURL:allowingReadAccessToURL:` selects packaged `Contents/Resources/web` or dev `web/dist`; `bun run build` passes | source/build verified |
+| Offline production bundle is loaded | Wry `mdvr://localhost` custom protocol selects packaged `Contents/Resources/web` or dev `web/dist`; `bun run build` passes | source/build verified |
 | HTML/code/Mermaid/TeX placeholders | Static sections and source text in `web/index.html` | implemented as placeholders only |
 | Search/selection/copy hooks | Fixture JS handlers and visible status messages | implemented in fixture; WebKit interaction unverified |
 | Restrictive CSP | Static nonce CSP in fixture; build passes | source/build verified; runtime enforcement unverified |
-| Nonpersistent storage | `WKWebsiteDataStore::nonPersistentDataStore` | source/build verified; runtime storage behavior unverified |
-| Navigation policy | SDK-documented delegate selector cancels actions | source/build verified; live callback and external-link denial unverified |
-| Closed bridge | No script message handler is installed | source verified; hostile-page runtime probe unverified |
+| Nonpersistent storage | Wry `with_incognito(true)` selects macOS nonpersistent storage | source/build verified; runtime storage behavior unverified |
+| Navigation policy | Wry navigation handler allows only `mdvr://localhost/index.html` | source/build verified; live callback and external-link denial unverified |
+| Closed bridge | Wry IPC handler decodes bounded revision-1 messages | source/tests verified; hostile-page runtime probe unverified |
 | Resize/clipping, focus/keyboard, close/reopen, activation | No desktop observation | unverified |
 | Production Markdown/HTML/sanitizer/Mermaid/TeX/resource broker | Not implemented in A slice | unverified; owned by later lanes |
 | Malicious-content, navigation-scheme, symlink, redirect, and resource-limit tests | Not implemented in A slice | unverified |

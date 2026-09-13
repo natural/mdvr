@@ -36,4 +36,5 @@ jobs:
       - run: sh scripts/verify/check-fixtures.sh
       - run: cargo build --release --locked
       - run: sh packaging/build-app.sh
+      - run: sh scripts/verify/check-packaging.sh packaging/build/mdvr.app
       - run: sh packaging/build-dmg.sh && sh scripts/verify/check-dmg.sh packaging/build/mdvr.dmg

@@ -546,7 +546,7 @@ impl MdvrView {
         let path = source.path.clone();
         let Some(mut web_view) = EmbeddedWebView::attach(window) else {
             self.failed_path = Some(path.clone());
-            self.report_error("WKWebView attachment failed".into());
+            self.report_error("Wry WebView attachment failed".into());
             return;
         };
         let _ = web_view.load_initial_document();
@@ -808,6 +808,9 @@ impl MdvrView {
     }
 
     fn drain_bridge_messages(&mut self, cx: &mut Context<Self>) {
+        if let Some(web_view) = self.web_view.as_mut() {
+            web_view.flush_pending();
+        }
         while let Ok(result) = self.remote_results.try_recv() {
             self.remote_in_flight = self.remote_in_flight.saturating_sub(1);
             if Some(result.document) == self.bridge_context.document
@@ -958,7 +961,7 @@ impl MdvrView {
             return;
         };
         let Some(mut web_view) = EmbeddedWebView::attach(window) else {
-            self.report_error("WKWebView attachment failed".into());
+            self.report_error("Wry WebView attachment failed".into());
             return;
         };
         let _ = web_view.load_initial_document();

@@ -87,7 +87,7 @@ and reruns full app inspection before detaching.
   Application/notary credentials, so no signed artifact is claimed.
 - `LSMinimumSystemVersion` and `MACOSX_DEPLOYMENT_TARGET` are 11.0, matching both
   release Mach-O slices; inspection fails on metadata/binary drift.
-- Native code resolves production assets from `Contents/Resources/web` in the
-  app bundle, with `web/dist` as dev-checkout fallback. `WKWebView::loadFileURL`
-  grants read access only to that canonical asset directory; navigation allows
-  only its `index.html`. Packaging rejects symlinks and network references.
+- Wry resolves production assets from `Contents/Resources/web` in the app
+  bundle, with `web/dist` as dev-checkout fallback. Its `mdvr://localhost`
+  custom protocol serves only canonical files below that directory; navigation
+  allows only `index.html`. Packaging rejects symlinks and network references.

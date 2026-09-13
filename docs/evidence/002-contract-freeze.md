@@ -4,7 +4,7 @@ Status: **implemented contract slice; M1 gate not passed**.
 
 M0 runtime evidence remains open. This document records the checked Rust/JSON
 shape so B–E can compile against one source, but it does not claim that GPUI,
-WKWebView, native resource policy, or the renderer has validated these values.
+Wry/WebKit, native resource policy, or the renderer has validated these values.
 
 ## Source of truth
 
@@ -89,7 +89,7 @@ Ran in current checkout:
 
 ```text
 cargo fmt --check                         passed
-cargo test --locked                       passed (70 tests)
+cargo test --locked                       passed (88 tests)
 cargo clippy --locked --all-targets -- -D warnings
                                            passed
 ```
@@ -97,13 +97,15 @@ cargo clippy --locked --all-targets -- -D warnings
 ## Current consumer integration status
 
 Revision 1 remains the shared contract for the native bridge, renderer, appearance,
-reload, and navigation integration. The files/navigation core is now wired into
+reload, and navigation integration. Wry IPC carries the same JSON bytes into the
+native bridge; custom-protocol asset loading and page readiness are host concerns.
+The files/navigation core is now wired into
 the app's navigation state at source level; live WebKit callback timing and
 visual navigation evidence remain open.
 
 ## M0 unresolved gate
 
-M0 is still blocked/open for real-app evidence: GPUI/WKWebView resize, focus,
+M0 is still blocked/open for real-app evidence: GPUI/Wry WebView resize, focus,
 keyboard, close/reopen and activation; live CSP/navigation behavior; selection,
 copy and reload position preservation; production parsing/rendering; bridge
 runtime probes; integration of the tested local canonical-path/symlink policy

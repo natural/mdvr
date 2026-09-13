@@ -13,7 +13,7 @@ discovery and reading workflow.
 
 - macOS only. The minimum OS version follows the selected dependencies; record
   their actual requirements before publishing a deployment target.
-- Rust application with a **GPUI shell and an embedded WKWebView document
+- Rust application with a **GPUI shell and a Wry-hosted WKWebView document
   surface**. No Electron. GPUI is fixed, not a candidate to replace silently.
 - All features identified as v1 below are required. A feasibility spike is a
   milestone, not a reduced release scope.

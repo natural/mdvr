@@ -90,10 +90,21 @@
           if (kind === 'next' || kind === 'previous') return Object.keys(action.payload).length === 1;
           return kind === 'open' && payload && typeof payload.query === 'string' && typeof payload.case_sensitive === 'boolean' && Object.keys(payload).length === 2;
         };
+        const postBridgeMessage = (envelope) => {
+          const encoded = JSON.stringify(envelope);
+          const wry = window.ipc?.postMessage;
+          const webkit = window.webkit?.messageHandlers?.mdvr?.postMessage;
+          const post = typeof wry === 'function' ? wry : webkit;
+          if (typeof post !== 'function') return false;
+          try {
+            post.call(typeof wry === 'function' ? window.ipc : window.webkit.messageHandlers.mdvr, encoded);
+            return true;
+          } catch {
+            return false;
+          }
+        };
         const postNativeAction = (action) => {
           if (!validBridgeAction(action) || !navigationContext) return false;
-          const handler = window.webkit?.messageHandlers?.mdvr;
-          if (!handler || typeof handler.postMessage !== 'function') return false;
           const envelope = {
             revision: 1,
             message: {
@@ -102,12 +113,7 @@
             },
           };
           nextRequestId = nextRequestId === Number.MAX_SAFE_INTEGER ? 1 : nextRequestId + 1;
-          try {
-            handler.postMessage(JSON.stringify(envelope));
-            return true;
-          } catch {
-            return false;
-          }
+          return postBridgeMessage(envelope);
         };
         let navigationContext = null;
         let nextResourceId = 1;
@@ -130,12 +136,7 @@
             },
           };
           nextRequestId = nextRequestId === Number.MAX_SAFE_INTEGER ? 1 : nextRequestId + 1;
-          try {
-            window.webkit?.messageHandlers?.mdvr?.postMessage(JSON.stringify(envelope));
-            return true;
-          } catch {
-            return false;
-          }
+          return postBridgeMessage(envelope);
         };
         const postPosition = () => {
           if (!navigationContext) return false;
@@ -147,7 +148,7 @@
             request: nextRequestId++, ...navigationContext,
             locator: { heading, block: block.dataset.blockId, offset: Math.max(0, Math.round(-top)), fallback: 'nearest_heading' },
           } } };
-          window.webkit?.messageHandlers?.mdvr?.postMessage(JSON.stringify(envelope));
+          postBridgeMessage(envelope);
           return true;
         };
         let positionTimer = 0;
@@ -181,10 +182,10 @@
             ...navigationContext,
             headings: headings.map(({ id, text, level }) => ({ id, text, level })),
           };
-          window.webkit?.messageHandlers?.mdvr?.postMessage(JSON.stringify({
+          postBridgeMessage({
             revision: 1,
             message: { kind: 'render.ready', payload },
-          }));
+          });
           return true;
         };
         const requestResource = (placeholder, reference, remote) => {
@@ -195,7 +196,7 @@
             request: nextRequestId++, resource, ...navigationContext, kind: 'image',
             reference: remote ? { remote_url: { value: reference } } : { relative_path: { value: reference } },
           } } };
-          window.webkit?.messageHandlers?.mdvr?.postMessage(JSON.stringify(envelope));
+          postBridgeMessage(envelope);
         };
         const requestNextRemote = () => {
           const next = remoteResources.shift();

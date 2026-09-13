@@ -10,22 +10,23 @@ Status: **integrated feature candidate; release blockers remain in 008**.
   equating LaunchServices process dispatch with success. Cold app startup retries
   delivery until callback readiness; bundled no-argument CLI passes caller cwd as a
   directory request, while cold packaged Dock launch restores saved state.
-- `EmbeddedWebView` is attached while GPUI builds that window, not during
-  repeated renders. The field retains WebKit view and navigation delegate until
-  root-view drop; `Drop` clears the delegate and removes/releases native
-  objects.
+- `EmbeddedWebView` is attached through Wry's `build_as_child` while GPUI
+  builds that window, not during repeated renders. Wry owns native view lifetime,
+  IPC, navigation callbacks, and teardown.
 - App invokes `EmbeddedWebView::load_initial_document()` after attachment.
-  Native code loads production `web/dist/index.html` with its hashed JS/CSS
-  assets from packaged `Contents/Resources/web` or dev-checkout fallback.
-  Page readiness is now tracked through `didFinishNavigation`; generation-tagged
-  source, appearance, and bridge-context updates queue until renderer functions
-  exist, with stale generations discarded.
+  Wry's `mdvr://localhost` custom protocol serves only canonical files below
+  packaged `Contents/Resources/web` or dev-checkout `web/dist`; traversal and
+  symlink escapes return 404. Wry incognito mode selects macOS's nonpersistent
+  data store.
+- Wry page-load callbacks set a native readiness flag. Source, appearance,
+  history, locator, and bridge-context updates queue until `flush_pending()` runs
+  on GPUI's bridge poll; then pending state applies once. Recreated WebViews
+  clear the global bridge queue on teardown.
 - Root GPUI element has no interactive overlay children. `ShellState` starts
   with renderer focus; this slice does not route picker/search/palette input.
-- Existing nonpersistent WebKit store and restrictive production CSP remain in
-  force. `loadFileURL:allowingReadAccessToURL:` limits reads to the canonical
-  app-owned web directory; navigation allows only its entrypoint and cancels
-  external or other local navigations.
+- Wry's incognito WebView uses nonpersistent storage. Restrictive production
+  CSP remains in force. Navigation allows only the exact `mdvr://localhost/index.html`
+  entrypoint; external and other custom-protocol navigations are cancelled.
 - Discovery uses pinned `ignore` crate Git semantics for nested `.gitignore`, escaped
   leading markers, character classes, `**`, and negation while retaining hidden and
   symlink traversal policy; custom glob parser was deleted.

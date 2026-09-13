@@ -14,10 +14,9 @@ use std::{
     fs,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    slice,
     sync::{
-        Mutex, OnceLock,
-        atomic::{AtomicU64, Ordering},
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -28,32 +27,22 @@ use crate::{
     },
     platform::bridge::{BridgeContext, BridgeMessage, BridgeRouter},
 };
-use block::Block;
 use cocoa::{
-    appkit::{NSView, NSViewHeightSizable, NSViewWidthSizable, NSWindowOrderingMode},
+    appkit::NSView,
     base::{BOOL, id, nil},
     foundation::NSString,
 };
 use gpui::Window;
-use objc::{
-    class,
-    declare::ClassDecl,
-    msg_send,
-    runtime::{Class, Object, Protocol, Sel},
-    sel, sel_impl,
-};
+use objc::{class, msg_send, sel, sel_impl};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use wry::{
+    PageLoadEvent, Rect, WebView, WebViewBuilder,
+    http::{Request, Response, header::CONTENT_TYPE},
+};
 
-#[link(name = "WebKit", kind = "framework")]
-unsafe extern "C" {}
-
-const BRIDGE_HANDLER_NAME: &str = "mdvr";
-const PENDING_STATE_IVAR: &str = "_mdvr_pending_state";
-const NS_UTF8_STRING_ENCODING: usize = 4;
 static ACCEPTED_BRIDGE_MESSAGES: AtomicU64 = AtomicU64::new(0);
 static REJECTED_BRIDGE_MESSAGES: AtomicU64 = AtomicU64::new(0);
 static BRIDGE_ROUTER: OnceLock<Mutex<BridgeRouter>> = OnceLock::new();
-static ALLOWED_DOCUMENT_PATH: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 
 const DEV_WEB_ASSET_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/web/dist");
 
@@ -82,74 +71,36 @@ fn resolve_web_asset_root(executable: &Path, development_root: &Path) -> Option<
         .find_map(|root| valid_web_asset_root(&root))
 }
 
-fn set_allowed_document_path(path: &Path) {
-    if let Ok(mut allowed) = ALLOWED_DOCUMENT_PATH
-        .get_or_init(|| Mutex::new(None))
-        .lock()
+fn navigation_allowed_url(url: String) -> bool {
+    url == "mdvr://localhost/index.html"
+}
+
+fn asset_path(root: &Path, relative: &str) -> Option<PathBuf> {
+    let relative = relative.trim_start_matches('/');
+    let path = root.join(if relative.is_empty() {
+        "index.html"
+    } else {
+        relative
+    });
+    path.canonicalize()
+        .ok()
+        .filter(|path| path.starts_with(root))
+}
+
+fn content_type(path: &str) -> &'static str {
+    match Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
     {
-        *allowed = Some(path.to_path_buf());
-    }
-}
-
-fn allowed_document_path() -> Option<PathBuf> {
-    ALLOWED_DOCUMENT_PATH
-        .get()
-        .and_then(|allowed| allowed.lock().ok())
-        .and_then(|allowed| allowed.clone())
-}
-
-fn navigation_path_allowed(candidate: &Path, expected: &Path) -> bool {
-    candidate == expected
-}
-
-fn navigation_path(action: id) -> Option<PathBuf> {
-    unsafe {
-        let request: id = msg_send![action, request];
-        if request.is_null() {
-            return None;
-        }
-        let url: id = msg_send![request, URL];
-        if url.is_null() {
-            return None;
-        }
-        let is_file_url: objc::runtime::BOOL = msg_send![url, isFileURL];
-        if is_file_url != objc::runtime::YES {
-            return None;
-        }
-        let path: id = msg_send![url, path];
-        if path.is_null() {
-            return None;
-        }
-        let utf8: *const std::ffi::c_char = msg_send![path, UTF8String];
-        if utf8.is_null() {
-            return None;
-        }
-        CStr::from_ptr(utf8).to_str().ok().map(PathBuf::from)
-    }
-}
-
-fn navigation_allowed(action: id) -> bool {
-    let Some(expected) = allowed_document_path() else {
-        return false;
-    };
-    let Some(candidate) = navigation_path(action) else {
-        return false;
-    };
-    navigation_path_allowed(&candidate, &expected)
-}
-
-fn file_url(path: &Path, is_directory: bool) -> Option<id> {
-    let path = path.to_str()?;
-    unsafe {
-        let path = NSString::alloc(nil).init_str(path);
-        let directory = if is_directory {
-            objc::runtime::YES
-        } else {
-            objc::runtime::NO
-        };
-        let url: id = msg_send![class!(NSURL), fileURLWithPath:path isDirectory:directory];
-        let _: () = msg_send![path, release];
-        (!url.is_null()).then_some(url)
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "text/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("woff") => "font/woff",
+        Some("woff2") => "font/woff2",
+        _ => "application/octet-stream",
     }
 }
 
@@ -340,6 +291,14 @@ pub(crate) fn open_external_url(url: &str) -> bool {
     }
 }
 
+pub(crate) fn reset_bridge_messages() {
+    if let Some(router) = BRIDGE_ROUTER.get()
+        && let Ok(mut router) = router.lock()
+    {
+        router.clear();
+    }
+}
+
 pub(crate) fn update_bridge_context(context: BridgeContext) {
     let router = BRIDGE_ROUTER.get_or_init(|| Mutex::new(BridgeRouter::new(context)));
     if let Ok(mut router) = router.lock() {
@@ -347,45 +306,10 @@ pub(crate) fn update_bridge_context(context: BridgeContext) {
     }
 }
 
-fn script_message_bytes(message: id) -> Option<Vec<u8>> {
-    unsafe {
-        if message.is_null() {
-            return None;
-        }
-
-        let body: id = msg_send![message, body];
-        if body.is_null() {
-            return None;
-        }
-        let is_string: objc::runtime::BOOL = msg_send![body, isKindOfClass: class!(NSString)];
-        if is_string != objc::runtime::YES {
-            return None;
-        }
-
-        let data: id = msg_send![body, dataUsingEncoding: NS_UTF8_STRING_ENCODING];
-        if data.is_null() {
-            return None;
-        }
-        let length: usize = msg_send![data, length];
-        if length > MAX_FRAME_BYTES {
-            return None;
-        }
-        let bytes: *const u8 = msg_send![data, bytes];
-        if bytes.is_null() && length != 0 {
-            return None;
-        }
-        Some(slice::from_raw_parts(bytes, length).to_vec())
-    }
-}
-
-extern "C" fn receive_script_message(_: &Object, _: Sel, _: id, message: id) {
-    if !main_thread() {
-        reject_bridge_message();
-        return;
-    }
-
-    let accepted = script_message_bytes(message)
-        .and_then(|bytes| canonical_bridge_message(&bytes).ok())
+fn receive_bridge_message(message: &str) {
+    let accepted = (message.len() <= MAX_FRAME_BYTES)
+        .then_some(message.as_bytes())
+        .and_then(|bytes| canonical_bridge_message(bytes).ok())
         .is_some_and(|bytes| {
             BRIDGE_ROUTER
                 .get_or_init(|| Mutex::new(BridgeRouter::new(BridgeContext::default())))
@@ -400,115 +324,10 @@ extern "C" fn receive_script_message(_: &Object, _: Sel, _: id, message: id) {
     }
 }
 
-fn bridge_handler_class() -> Option<&'static Class> {
-    static CLASS: OnceLock<Option<&'static Class>> = OnceLock::new();
-
-    CLASS
-        .get_or_init(|| {
-            let mut declaration = ClassDecl::new("MdvrScriptMessageHandler", class!(NSObject))?;
-            // WebKit dispatches the selector even when protocol metadata is not registered.
-            if let Some(protocol) = Protocol::get("WKScriptMessageHandler") {
-                declaration.add_protocol(protocol);
-            }
-            unsafe {
-                declaration.add_method(
-                    sel!(userContentController:didReceiveScriptMessage:),
-                    receive_script_message as extern "C" fn(&Object, Sel, id, id),
-                );
-            }
-            Some(declaration.register())
-        })
-        .as_ref()
-        .copied()
-}
-
-extern "C" fn decide_navigation(
-    _: &Object,
-    _: Sel,
-    _: id,
-    navigation_action: id,
-    decision_handler: id,
-) {
-    if decision_handler.is_null() {
-        return;
+fn evaluate_javascript(view: &WebView, script: &str) {
+    if let Err(error) = view.evaluate_script(script) {
+        eprintln!("mdvr: JavaScript evaluation failed: {error}");
     }
-
-    let allowed = navigation_allowed(navigation_action);
-    eprintln!(
-        "mdvr: WebKit navigation policy {}",
-        if allowed { "allow" } else { "cancel" }
-    );
-    let policy = if allowed { 1 } else { 0 };
-    unsafe {
-        (*(decision_handler as *mut Block<(isize,), ()>)).call((policy,));
-    }
-}
-
-extern "C" fn finish_navigation(delegate: &Object, _: Sel, web_view: id, _: id) {
-    if !main_thread() {
-        return;
-    }
-    eprintln!("mdvr: WebKit navigation finished");
-    let state = unsafe { *delegate.get_ivar::<usize>(PENDING_STATE_IVAR) as *mut PendingPageState };
-    if web_view.is_null() || state.is_null() {
-        return;
-    }
-    unsafe {
-        (*state).apply_pending(web_view);
-    }
-}
-
-fn evaluate_javascript(view: id, script: &str) {
-    if view.is_null() {
-        return;
-    }
-    unsafe {
-        let script = NSString::alloc(nil).init_str(script);
-        let completion = block::ConcreteBlock::new(|_: id, error: id| {
-            if !error.is_null() {
-                // Exception details may contain document source; never log userInfo.
-                let description: id = msg_send![error, localizedDescription];
-                let text: *const std::ffi::c_char = msg_send![description, UTF8String];
-                if !text.is_null() {
-                    eprintln!(
-                        "mdvr: JavaScript evaluation failed: {}",
-                        CStr::from_ptr(text).to_string_lossy()
-                    );
-                }
-            }
-        })
-        .copy();
-        let _: () = msg_send![view,
-            evaluateJavaScript: script
-            completionHandler: &*completion];
-        let _: () = msg_send![script, release];
-    }
-}
-
-fn navigation_delegate_class() -> Option<&'static Class> {
-    static CLASS: OnceLock<Option<&'static Class>> = OnceLock::new();
-
-    CLASS
-        .get_or_init(|| {
-            let mut declaration = ClassDecl::new("MdvrNavigationDelegate", class!(NSObject))?;
-            if let Some(protocol) = Protocol::get("WKNavigationDelegate") {
-                declaration.add_protocol(protocol);
-            }
-            declaration.add_ivar::<usize>(PENDING_STATE_IVAR);
-            unsafe {
-                declaration.add_method(
-                    sel!(webView:decidePolicyForNavigationAction:decisionHandler:),
-                    decide_navigation as extern "C" fn(&Object, Sel, id, id, id),
-                );
-                declaration.add_method(
-                    sel!(webView:didFinishNavigation:),
-                    finish_navigation as extern "C" fn(&Object, Sel, id, id),
-                );
-            }
-            Some(declaration.register())
-        })
-        .as_ref()
-        .copied()
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -534,6 +353,7 @@ struct PendingLocator {
     generation: Generation,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default, PartialEq)]
 struct PendingPage {
     source: Option<PendingSource>,
@@ -661,6 +481,7 @@ impl PendingPageState {
         true
     }
 
+    #[allow(dead_code)]
     fn take_pending(&mut self) -> PendingPage {
         self.page_ready = true;
         PendingPage {
@@ -673,7 +494,8 @@ impl PendingPageState {
         }
     }
 
-    fn apply_pending(&mut self, web_view: id) {
+    #[allow(dead_code)]
+    fn apply_pending(&mut self, web_view: &WebView) {
         let pending = self.take_pending();
         if let Some(context) = pending.context {
             evaluate_javascript(
@@ -710,13 +532,12 @@ impl PendingPageState {
 
 pub struct EmbeddedWebView {
     parent: id,
-    view: id,
-    navigation_delegate: id,
-    bridge_handler: id,
+    view: WebView,
     current_generation: DocumentGeneration,
     #[allow(dead_code)]
     appearance_generation: AppearanceGeneration,
     pending_state: Box<PendingPageState>,
+    page_loaded: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -817,26 +638,17 @@ fn appearance_script(appearance: &Appearance) -> Result<String, ContractError> {
 
 impl EmbeddedWebView {
     pub fn focus(&self) -> bool {
-        assert!(main_thread(), "WKWebView must be used on main thread");
-        unsafe {
-            let window: id = msg_send![self.view, window];
-            if window.is_null() {
-                return false;
-            }
-            let accepted: BOOL = msg_send![window, makeFirstResponder: self.view];
-            accepted == objc::runtime::YES
-        }
+        self.view.focus().is_ok()
     }
 
     pub fn sync_frame(&self) {
-        assert!(main_thread(), "WKWebView must be used on main thread");
+        assert!(main_thread(), "Wry WebView must be used on main thread");
         unsafe {
             let bounds = NSView::bounds(self.parent);
-            let _: () = msg_send![self.view, setFrame: bounds];
-            let _: () = msg_send![self.parent,
-                addSubview: self.view
-                positioned: NSWindowOrderingMode::NSWindowAbove
-                relativeTo: nil];
+            let _ = self.view.set_bounds(Rect {
+                position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
+                size: wry::dpi::LogicalSize::new(bounds.size.width, bounds.size.height).into(),
+            });
         }
     }
 
@@ -844,126 +656,80 @@ impl EmbeddedWebView {
         if !main_thread() {
             return None;
         }
+        let executable = std::env::current_exe().ok()?;
+        let development_root = Path::new(DEV_WEB_ASSET_ROOT);
+        let root = resolve_web_asset_root(&executable, development_root)?;
         let handle = HasWindowHandle::window_handle(window).ok()?;
         let parent = match handle.as_raw() {
             RawWindowHandle::AppKit(handle) => handle.ns_view.as_ptr() as id,
             _ => return None,
         };
-
-        unsafe {
-            let initial_bounds = NSView::bounds(parent);
-            eprintln!(
-                "mdvr: WebKit initial frame {}x{}",
-                initial_bounds.size.width, initial_bounds.size.height
-            );
-            let configuration: id = msg_send![class!(WKWebViewConfiguration), alloc];
-            let configuration: id = msg_send![configuration, init];
-            if configuration.is_null() {
-                return None;
-            }
-
-            let data_store: id = msg_send![class!(WKWebsiteDataStore), nonPersistentDataStore];
-            let _: () = msg_send![configuration, setWebsiteDataStore: data_store];
-
-            let Some(bridge_class) = bridge_handler_class() else {
-                eprintln!("mdvr: script-message handler class unavailable");
-                let _: () = msg_send![configuration, release];
-                return None;
-            };
-            let bridge_handler: id = msg_send![bridge_class, new];
-            if bridge_handler.is_null() {
-                let _: () = msg_send![configuration, release];
-                return None;
-            }
-            let user_content_controller: id = msg_send![configuration, userContentController];
-            if user_content_controller.is_null() {
-                let _: () = msg_send![bridge_handler, release];
-                let _: () = msg_send![configuration, release];
-                return None;
-            }
-            let bridge_name = NSString::alloc(nil).init_str(BRIDGE_HANDLER_NAME);
-            let _: () = msg_send![user_content_controller,
-                addScriptMessageHandler: bridge_handler
-                name: bridge_name];
-            let _: () = msg_send![bridge_name, release];
-
-            let Some(delegate_class) = navigation_delegate_class() else {
-                eprintln!("mdvr: navigation delegate class unavailable");
-                let _: () = msg_send![bridge_handler, release];
-                let _: () = msg_send![configuration, release];
-                return None;
-            };
-            let navigation_delegate: id = msg_send![delegate_class, new];
-            if navigation_delegate.is_null() {
-                let _: () = msg_send![bridge_handler, release];
-                let _: () = msg_send![configuration, release];
-                return None;
-            }
-
-            let view: id = msg_send![class!(WKWebView), alloc];
-            let view: id = msg_send![view, initWithFrame: initial_bounds
-                configuration: configuration];
-            let _: () = msg_send![configuration, release];
-            if view.is_null() {
-                let _: () = msg_send![navigation_delegate, release];
-                let _: () = msg_send![bridge_handler, release];
-                return None;
-            }
-
-            let mut pending_state = Box::new(PendingPageState::default());
-            let pending_state_ptr = pending_state.as_mut() as *mut PendingPageState as usize;
-            // Delegate is weak on WKWebView; retain it in EmbeddedWebView.
-            (*navigation_delegate).set_ivar(PENDING_STATE_IVAR, pending_state_ptr);
-            let _: () = msg_send![view, setNavigationDelegate: navigation_delegate];
-            NSView::setAutoresizingMask_(view, NSViewWidthSizable | NSViewHeightSizable);
-            let _: () = msg_send![parent,
-                addSubview: view
-                positioned: NSWindowOrderingMode::NSWindowAbove
-                relativeTo: nil];
-
-            Some(Self {
-                parent,
-                view,
-                navigation_delegate,
-                bridge_handler,
-                current_generation: DocumentGeneration::default(),
-                appearance_generation: AppearanceGeneration::default(),
-                pending_state,
+        let initial_bounds = unsafe { NSView::bounds(parent) };
+        let page_loaded = Arc::new(AtomicBool::new(false));
+        let page_loaded_callback = page_loaded.clone();
+        let protocol_root = root.clone();
+        let view = WebViewBuilder::new()
+            .with_custom_protocol("mdvr".into(), move |_id, request: Request<Vec<u8>>| {
+                let relative = request.uri().path().trim_start_matches('/');
+                let response =
+                    asset_path(&protocol_root, relative).and_then(|path| fs::read(path).ok());
+                match response {
+                    Some(body) => Response::builder()
+                        .header(CONTENT_TYPE, content_type(relative))
+                        .body(body)
+                        .expect("valid Wry asset response")
+                        .map(Into::into),
+                    None => Response::builder()
+                        .status(404)
+                        .body(Vec::new())
+                        .expect("valid Wry error response")
+                        .map(Into::into),
+                }
             })
-        }
+            .with_ipc_handler(|request| receive_bridge_message(request.body()))
+            .with_on_page_load_handler(move |event, url| {
+                if matches!(event, PageLoadEvent::Finished) && url == "mdvr://localhost/index.html"
+                {
+                    page_loaded_callback.store(true, Ordering::Release);
+                }
+            })
+            .with_incognito(true)
+            .with_navigation_handler(navigation_allowed_url)
+            .with_url("mdvr://localhost/index.html")
+            .with_bounds(Rect {
+                position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
+                size: wry::dpi::LogicalSize::new(
+                    initial_bounds.size.width,
+                    initial_bounds.size.height,
+                )
+                .into(),
+            })
+            .build_as_child(window)
+            .ok()?;
+        Some(Self {
+            parent,
+            view,
+            current_generation: DocumentGeneration::default(),
+            appearance_generation: AppearanceGeneration::default(),
+            pending_state: Box::new(PendingPageState::default()),
+            page_loaded,
+        })
     }
 
     /// Load production web assets from the packaged app or development checkout.
-    /// WebKit may read only this canonical app-owned asset directory.
+    /// Wry may read only this canonical app-owned asset directory.
     pub fn load_initial_document(&mut self) -> bool {
-        assert!(main_thread(), "WKWebView must be used on main thread");
-        let executable = match std::env::current_exe() {
-            Ok(executable) => executable,
-            Err(error) => {
-                eprintln!("mdvr: cannot locate executable for web assets: {error}");
-                return false;
-            }
-        };
-        let development_root = Path::new(DEV_WEB_ASSET_ROOT);
-        let Some(root) = resolve_web_asset_root(&executable, development_root) else {
-            eprintln!("mdvr: production web assets missing");
-            return false;
-        };
-        let entry = root.join("index.html");
-        set_allowed_document_path(&entry);
-        unsafe {
-            let Some(entry_url) = file_url(&entry, false) else {
-                return false;
-            };
-            let Some(root_url) = file_url(&root, true) else {
-                return false;
-            };
-            self.pending_state.begin_load();
-            let _: id = msg_send![self.view,
-                loadFileURL: entry_url
-                allowingReadAccessToURL: root_url];
-        }
+        assert!(main_thread(), "Wry WebView must be used on main thread");
+        self.pending_state.begin_load();
+        // Wry owns navigation and asset loading; its custom protocol started in attach.
         true
+    }
+
+    /// Apply state queued while Wry loads bundled renderer assets.
+    pub fn flush_pending(&mut self) {
+        if !self.pending_state.page_ready() && self.page_loaded.load(Ordering::Acquire) {
+            self.pending_state.apply_pending(&self.view);
+        }
     }
 
     /// Push trusted native source into the already-loaded bundled renderer.
@@ -973,7 +739,7 @@ impl EmbeddedWebView {
         source: &str,
         generation: Generation,
     ) -> Result<bool, serde_json::Error> {
-        assert!(main_thread(), "WKWebView must be used on main thread");
+        assert!(main_thread(), "Wry WebView must be used on main thread");
         let script = document_load_script(source, generation)?;
         if !self.current_generation.accept(generation) {
             return Ok(false);
@@ -981,7 +747,7 @@ impl EmbeddedWebView {
 
         if self.pending_state.page_ready() {
             self.pending_state.advance_source_generation(generation);
-            evaluate_javascript(self.view, &script);
+            evaluate_javascript(&self.view, &script);
         } else {
             let accepted = self
                 .pending_state
@@ -996,7 +762,7 @@ impl EmbeddedWebView {
         document: Option<DocumentId>,
         generation: Option<Generation>,
     ) -> Result<(), serde_json::Error> {
-        assert!(main_thread(), "WKWebView must be used on main thread");
+        assert!(main_thread(), "Wry WebView must be used on main thread");
         let context = BridgeContext {
             document,
             generation,
@@ -1005,31 +771,31 @@ impl EmbeddedWebView {
             return Ok(());
         }
         if self.pending_state.page_ready() {
-            evaluate_javascript(self.view, &navigation_context_script(document, generation));
+            evaluate_javascript(&self.view, &navigation_context_script(document, generation));
         }
         Ok(())
     }
 
     pub fn navigate_anchor(&self, anchor: &str) -> Result<(), serde_json::Error> {
-        assert!(main_thread(), "WKWebView must be used on main thread");
+        assert!(main_thread(), "Wry WebView must be used on main thread");
         let script = anchor_script(anchor)?;
         if self.pending_state.page_ready() {
-            evaluate_javascript(self.view, &script);
+            evaluate_javascript(&self.view, &script);
         }
         Ok(())
     }
 
     pub fn clear_error(&self) {
-        assert!(main_thread(), "WKWebView must be used on main thread");
+        assert!(main_thread(), "Wry WebView must be used on main thread");
         if self.pending_state.page_ready() {
-            evaluate_javascript(self.view, "window.mdvrClearError();");
+            evaluate_javascript(&self.view, "window.mdvrClearError();");
         }
     }
 
     pub fn show_error(&self, message: &str) -> Result<(), serde_json::Error> {
-        assert!(main_thread(), "WKWebView must be used on main thread");
+        assert!(main_thread(), "Wry WebView must be used on main thread");
         if self.pending_state.page_ready() {
-            evaluate_javascript(self.view, &error_script(message)?);
+            evaluate_javascript(&self.view, &error_script(message)?);
         }
         Ok(())
     }
@@ -1039,10 +805,10 @@ impl EmbeddedWebView {
         locator: Locator,
         generation: Generation,
     ) -> Result<(), serde_json::Error> {
-        assert!(main_thread(), "WKWebView must be used on main thread");
+        assert!(main_thread(), "Wry WebView must be used on main thread");
         let script = locator_script(&locator)?;
         if self.pending_state.page_ready() {
-            evaluate_javascript(self.view, &script);
+            evaluate_javascript(&self.view, &script);
         } else {
             self.pending_state.replace_locator(locator, generation);
         }
@@ -1050,33 +816,33 @@ impl EmbeddedWebView {
     }
 
     pub fn set_theme_choices(&mut self, names: &[String], selected: Option<&str>) {
-        assert!(main_thread(), "WKWebView must be used on main thread");
+        assert!(main_thread(), "Wry WebView must be used on main thread");
         let names = serde_json::to_string(names).expect("theme names serialize");
         let selected = serde_json::to_string(&selected).expect("theme selection serializes");
         let script = format!("window.mdvrSetThemeChoices({names}, {selected});");
         if self.pending_state.page_ready() {
-            evaluate_javascript(self.view, &script);
+            evaluate_javascript(&self.view, &script);
         } else {
             self.pending_state.theme_choices = Some(script);
         }
     }
 
     pub fn set_history_availability(&mut self, back: bool, forward: bool) {
-        assert!(main_thread(), "WKWebView must be used on main thread");
+        assert!(main_thread(), "Wry WebView must be used on main thread");
         let script = format!("window.mdvrSetHistoryAvailability({back}, {forward});");
         if self.pending_state.page_ready() {
-            evaluate_javascript(self.view, &script);
+            evaluate_javascript(&self.view, &script);
         } else {
             self.pending_state.history = Some(script);
         }
     }
 
     pub fn deliver_resource(&self, result: ResourceResult) -> Result<(), ContractError> {
-        assert!(main_thread(), "WKWebView must be used on main thread");
+        assert!(main_thread(), "Wry WebView must be used on main thread");
         let json = String::from_utf8(encode(&Envelope::new(Message::ResourceResult(result)))?)
             .expect("JSON encoding is UTF-8");
         evaluate_javascript(
-            self.view,
+            &self.view,
             &format!("void window.mdvrResolveResource({json});"),
         );
         Ok(())
@@ -1090,7 +856,7 @@ impl EmbeddedWebView {
         appearance: &Appearance,
         generation: Generation,
     ) -> Result<bool, ContractError> {
-        assert!(main_thread(), "WKWebView must be used on main thread");
+        assert!(main_thread(), "Wry WebView must be used on main thread");
         let script = appearance_script(appearance)?;
         if !self
             .appearance_generation
@@ -1106,7 +872,7 @@ impl EmbeddedWebView {
             return Ok(false);
         }
         if self.pending_state.page_ready() {
-            evaluate_javascript(self.view, &script);
+            evaluate_javascript(&self.view, &script);
         }
         Ok(true)
     }
@@ -1114,23 +880,11 @@ impl EmbeddedWebView {
 
 impl Drop for EmbeddedWebView {
     fn drop(&mut self) {
-        assert!(main_thread(), "WKWebView must be torn down on main thread");
-        unsafe {
-            let configuration: id = msg_send![self.view, configuration];
-            let user_content_controller: id = msg_send![configuration, userContentController];
-            if !user_content_controller.is_null() {
-                let bridge_name = NSString::alloc(nil).init_str(BRIDGE_HANDLER_NAME);
-                let _: () = msg_send![user_content_controller,
-                    removeScriptMessageHandlerForName: bridge_name];
-                let _: () = msg_send![bridge_name, release];
-            }
-            let _: () = msg_send![self.view, setNavigationDelegate: nil];
-            (*self.navigation_delegate).set_ivar(PENDING_STATE_IVAR, 0usize);
-            NSView::removeFromSuperview(self.view);
-            let _: () = msg_send![self.view, release];
-            let _: () = msg_send![self.bridge_handler, release];
-            let _: () = msg_send![self.navigation_delegate, release];
-        }
+        assert!(
+            main_thread(),
+            "Wry WebView must be torn down on main thread"
+        );
+        reset_bridge_messages();
     }
 }
 
@@ -1158,22 +912,6 @@ mod tests {
         fs::set_permissions(&path, permissions).unwrap();
         assert_eq!(canonical_safe_local_file(&path), None);
         fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn webkit_callback_classes_register_without_requiring_protocol_metadata() {
-        let handler = bridge_handler_class().expect("script handler class");
-        assert!(
-            handler
-                .instance_method(sel!(userContentController:didReceiveScriptMessage:))
-                .is_some()
-        );
-        let delegate = navigation_delegate_class().expect("navigation delegate class");
-        assert!(
-            delegate
-                .instance_method(sel!(webView:didFinishNavigation:))
-                .is_some()
-        );
     }
 
     #[test]
@@ -1249,12 +987,32 @@ mod tests {
 
     #[test]
     fn navigation_allows_only_exact_owned_entrypoint() {
-        let entry = Path::new("/Applications/mdvr.app/Contents/Resources/web/index.html");
-        assert!(navigation_path_allowed(entry, entry));
-        assert!(!navigation_path_allowed(
-            Path::new("/Applications/mdvr.app/Contents/Resources/web/other.html"),
-            entry
+        assert!(navigation_allowed_url("mdvr://localhost/index.html".into()));
+        assert!(!navigation_allowed_url(
+            "mdvr://localhost/other.html".into()
         ));
+        assert!(!navigation_allowed_url("https://example.com".into()));
+    }
+
+    #[test]
+    fn custom_protocol_rejects_traversal_and_symlink_escape() {
+        let base = std::env::temp_dir().join(format!("mdvr-protocol-{}", std::process::id()));
+        let root = base.join("web");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("index.html"), "safe").unwrap();
+        fs::write(base.join("secret"), "secret").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(base.join("secret"), root.join("escape")).unwrap();
+
+        let root = root.canonicalize().unwrap();
+        assert_eq!(
+            asset_path(&root, "/index.html"),
+            Some(root.join("index.html"))
+        );
+        assert_eq!(asset_path(&root, "/../secret"), None);
+        #[cfg(unix)]
+        assert_eq!(asset_path(&root, "/escape"), None);
+        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
