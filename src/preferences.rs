@@ -18,6 +18,7 @@ pub const MAX_THEME_NAME_BYTES: usize = 256;
 pub const MIN_TEXT_SCALE_PERCENT: u16 = 50;
 pub const MAX_TEXT_SCALE_PERCENT: u16 = 300;
 pub const DEFAULT_TEXT_SCALE_PERCENT: u16 = 100;
+pub const MAX_RECENT_FILES: usize = 10;
 pub const MIN_WINDOW_WIDTH: u32 = 320;
 pub const MAX_WINDOW_WIDTH: u32 = 10_000;
 pub const MIN_WINDOW_HEIGHT: u32 = 240;
@@ -158,6 +159,8 @@ pub struct Preferences {
     #[serde(default)]
     pub last_document: Option<PathBuf>,
     #[serde(default)]
+    pub recent_files: Vec<PathBuf>,
+    #[serde(default)]
     pub reading_locator: Option<ReadingLocator>,
     #[serde(default)]
     pub theme: Option<String>,
@@ -194,6 +197,7 @@ impl Default for Preferences {
             version: PREFERENCES_VERSION,
             browsing_root: None,
             last_document: None,
+            recent_files: Vec::new(),
             reading_locator: None,
             theme: None,
             theme_file: None,
@@ -213,6 +217,12 @@ impl Preferences {
         }
         validate_optional_path(self.browsing_root.as_deref())?;
         validate_optional_path(self.last_document.as_deref())?;
+        if self.recent_files.len() > MAX_RECENT_FILES {
+            return Err(PreferencesError::Invalid("too many recent files"));
+        }
+        for path in &self.recent_files {
+            validate_path(path)?;
+        }
         if let Some(locator) = &self.reading_locator {
             locator.validate()?;
         }
@@ -223,6 +233,12 @@ impl Preferences {
         }
         self.window.validate()?;
         Ok(())
+    }
+
+    pub fn record_recent(&mut self, path: PathBuf) {
+        self.recent_files.retain(|recent| recent != &path);
+        self.recent_files.insert(0, path);
+        self.recent_files.truncate(MAX_RECENT_FILES);
     }
 
     pub fn set_text_scale(&mut self, percent: u16) -> Result<(), PreferencesError> {

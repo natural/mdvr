@@ -36,6 +36,12 @@ actions!(
     ]
 );
 
+#[derive(Clone, PartialEq, Debug, gpui::Action)]
+#[action(namespace = mdvr, no_json)]
+struct OpenRecent {
+    path: String,
+}
+
 use crate::{
     LaunchPlan,
     contracts::{
@@ -63,7 +69,7 @@ use crate::{
         conventional_path, load_or_default, resolve_launch, save,
     },
     theme::{
-        AppearanceMode, Theme, ThemeFamily, ZedFonts, default_family, default_theme, import_file,
+        AppearanceMode, Theme, ThemeFamily, ZedFonts, available_family, default_theme, import_file,
         load_zed_config,
     },
     ui::{FocusOwner, ShellCommand, ShellState},
@@ -319,11 +325,22 @@ impl SharedPreferences {
         let zed = preferences.use_zed_config.then(load_zed_config).flatten();
         let zed_theme = zed.as_ref().and_then(|config| config.theme.clone());
         let zed_fonts = zed.map(|config| config.fonts);
-        let theme_family = preferences
+        let mut theme_family = available_family();
+        if let Some(imported) = preferences
             .theme_file
             .as_deref()
             .and_then(|path| import_file(path).ok())
-            .unwrap_or_else(default_family);
+        {
+            for theme in imported.members {
+                if !theme_family
+                    .members
+                    .iter()
+                    .any(|member| member.name == theme.name)
+                {
+                    theme_family.members.push(theme);
+                }
+            }
+        }
         Self {
             preferences,
             theme_family,
@@ -779,6 +796,8 @@ impl MdvrView {
             return;
         }
         self.navigation.open_initial(source.clone());
+        cx.add_recent_document(&path);
+        self.preferences.record_recent(path.clone());
         self.shell.current_document = Some(path.clone());
         self.failed_path = None;
         self.picker_return = false;
@@ -1255,6 +1274,7 @@ impl MdvrView {
             return;
         }
         self.web_view = Some(web_view);
+        cx.add_recent_document(&current.path);
         self.picker_return = false;
         self.discovery_task = None;
         self.document_committed(BridgeContext {
@@ -1569,7 +1589,8 @@ impl MdvrView {
         let path = current.path.clone();
         let generation = current.generation;
         let locator = contract_locator(&current.locator);
-        self.shell.current_document = Some(path);
+        self.shell.current_document = Some(path.clone());
+        self.preferences.record_recent(path);
         self.document_committed(BridgeContext {
             document: Some(document),
             generation: Some(generation),
@@ -1785,7 +1806,8 @@ impl MdvrView {
                 .items_center()
                 .justify_end()
                 .pr_3()
-                .text_sm()
+                .font_family("SF Mono")
+                .text_xs()
                 .child(title.to_owned()),
         )
         .into_any_element()
@@ -1817,8 +1839,9 @@ impl Render for MdvrView {
             .to_owned();
         window.set_window_title(&title);
         let active = window.is_window_active();
+        let maximized = window.is_maximized();
         set_window_background_draggable(window, active && self.web_view.is_some());
-        set_titlebar_controls_visible(window, active);
+        set_titlebar_controls_visible(window, active || maximized);
         self.process_next_open(window, cx);
         if self.initialized {
             self.update_appearance(window);
@@ -1826,7 +1849,7 @@ impl Render for MdvrView {
         }
         let shared = cx.global::<SharedPreferences>().clone();
         let palette = ui_palette(&self.preferences, &shared, window);
-        let titlebar = self.titlebar(active, palette, &title, cx);
+        let titlebar = self.titlebar(active || maximized, palette, &title, cx);
         if self.loading_document {
             return main_window_frame(
                 titlebar,
@@ -1834,7 +1857,11 @@ impl Render for MdvrView {
             );
         }
         if let Some(web_view) = self.web_view.as_ref() {
-            web_view.sync_frame(if active { MAIN_TITLEBAR_HEIGHT } else { 0.0 });
+            web_view.sync_frame(if active || maximized {
+                MAIN_TITLEBAR_HEIGHT
+            } else {
+                0.0
+            });
             return main_window_frame(titlebar, div().size_full().into_any_element());
         }
         if let Some((path, bytes)) = self.pending_large.as_ref() {
@@ -2163,6 +2190,10 @@ fn open_file_action(_: &OpenFileAction, cx: &mut App) {
     cx.defer(prompt_for_document);
 }
 
+fn open_recent_action(action: &OpenRecent, cx: &mut App) {
+    open_new_window(cx, PathBuf::from(&action.path), LaunchIntent::ExplicitFile);
+}
+
 fn close_window_action(_: &CloseWindow, cx: &mut App) {
     if let Some(window) = cx.active_window() {
         let _ = window.update(cx, |_, window, _| window.remove_window());
@@ -2390,8 +2421,9 @@ pub fn run(launch: LaunchPlan) {
         let preferences = conventional_path()
             .map(|path| load_or_default(&path).preferences)
             .unwrap_or_default();
-        cx.set_global(SharedPreferences::new(preferences));
+        cx.set_global(SharedPreferences::new(preferences.clone()));
         cx.on_action(open_file_action);
+        cx.on_action(open_recent_action);
         cx.on_action(open_folder_action);
         cx.on_action(show_picker_action);
         cx.on_action(close_window_action);
@@ -2418,6 +2450,18 @@ pub fn run(launch: LaunchPlan) {
             gpui::KeyBinding::new("cmd-,", ShowPreferences, None),
             gpui::KeyBinding::new("cmd-q", QuitApp, None),
         ]);
+        let recent_items = preferences
+            .recent_files
+            .iter()
+            .filter_map(|path| {
+                Some(MenuItem::action(
+                    path.file_name()?.to_string_lossy().to_string(),
+                    OpenRecent {
+                        path: path.to_string_lossy().to_string(),
+                    },
+                ))
+            })
+            .collect();
         cx.set_menus(vec![
             Menu {
                 name: "mdvr".into(),
@@ -2434,10 +2478,22 @@ pub fn run(launch: LaunchPlan) {
                 items: vec![
                     MenuItem::action("Open File…", OpenFileAction),
                     MenuItem::action("Open Folder…", OpenFolderAction),
+                    MenuItem::submenu(Menu {
+                        name: "Open Recent".into(),
+                        items: recent_items,
+                    }),
                     MenuItem::separator(),
                     MenuItem::action("Browse Files", ShowPicker),
                     MenuItem::action("Close Window", CloseWindow),
                 ],
+            },
+            Menu {
+                name: "Window".into(),
+                items: vec![MenuItem::action("Close Window", CloseWindow)],
+            },
+            Menu {
+                name: "Help".into(),
+                items: vec![MenuItem::action("About mdvr", AboutMdvr)],
             },
             Menu {
                 name: "Edit".into(),

@@ -468,63 +468,60 @@ pub fn default_theme(mode: AppearanceMode) -> Theme {
     }
 }
 
-pub fn tokyo_night_theme(mode: AppearanceMode) -> Theme {
-    let dark = mode == AppearanceMode::Dark;
-    let (background, foreground, code, accent, syntax) = if dark {
-        (
-            "#1a1b26",
-            "#c0caf5",
-            "#16161e",
-            "#7aa2f7",
-            vec![
-                token(SyntaxRole::Keyword, "#bb9af7"),
-                token(SyntaxRole::String, "#9ece6a"),
-                token(SyntaxRole::Comment, "#565f89"),
-                token(SyntaxRole::Number, "#ff9e64"),
-                token(SyntaxRole::Function, "#7dcfff"),
-                token(SyntaxRole::Type, "#2ac3de"),
-            ],
-        )
-    } else {
-        (
-            "#e6e7ed",
-            "#3760bf",
-            "#d5d6db",
-            "#2e7de9",
-            vec![
-                token(SyntaxRole::Keyword, "#9854f1"),
-                token(SyntaxRole::String, "#587539"),
-                token(SyntaxRole::Comment, "#848cb5"),
-                token(SyntaxRole::Number, "#b15c00"),
-                token(SyntaxRole::Function, "#007197"),
-                token(SyntaxRole::Type, "#007197"),
-            ],
-        )
-    };
-    Theme {
-        name: format!("Tokyo Night — {}", if dark { "Dark" } else { "Light" }),
-        tokens: AppearanceTokens {
-            mode,
-            scale_percent: 100,
-            reader_background: background.into(),
-            reader_foreground: foreground.into(),
-            code_background: code.into(),
-            accent: accent.into(),
-            syntax,
-        },
-    }
-}
-
 pub fn default_family() -> ThemeFamily {
     ThemeFamily {
         name: "mdvr defaults".into(),
         members: vec![
             default_theme(AppearanceMode::Light),
             default_theme(AppearanceMode::Dark),
-            tokyo_night_theme(AppearanceMode::Light),
-            tokyo_night_theme(AppearanceMode::Dark),
         ],
     }
+}
+
+pub fn available_family() -> ThemeFamily {
+    let mut family = default_family();
+    let Some(home) = env::var_os("HOME") else {
+        return family;
+    };
+    let installed = Path::new(&home).join("Library/Application Support/Zed/extensions/installed");
+    let Ok(extensions) = fs::read_dir(installed) else {
+        return family;
+    };
+    for extension in extensions.flatten() {
+        let themes = extension.path().join("themes");
+        let Ok(files) = fs::read_dir(themes) else {
+            continue;
+        };
+        for file in files.flatten() {
+            let path = file.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(source) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(root) = serde_json::from_str::<Value>(&jsonc(&source)) else {
+                continue;
+            };
+            let names = root
+                .get("themes")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|theme| theme.get("name").and_then(Value::as_str));
+            for name in names {
+                if let Some(theme) = zed_theme(&path, name)
+                    && !family
+                        .members
+                        .iter()
+                        .any(|member| member.name == theme.name)
+                {
+                    family.members.push(theme);
+                }
+            }
+        }
+    }
+    family
 }
 
 pub fn import_family(source: &str) -> Result<ThemeFamily, ThemeError> {
@@ -850,19 +847,6 @@ mod tests {
         let bad = ZED.replace("#111111", "url(javascript:bad)");
         assert!(apply_import(&mut current, &bad).is_err());
         assert_eq!(current, before);
-    }
-
-    #[test]
-    fn tokyo_night_has_light_and_dark_heading_accents() {
-        let family = default_family();
-        assert_eq!(
-            family.member("Tokyo Night — Light").unwrap().tokens.accent,
-            "#2e7de9"
-        );
-        assert_eq!(
-            family.member("Tokyo Night — Dark").unwrap().tokens.accent,
-            "#7aa2f7"
-        );
     }
 
     #[test]

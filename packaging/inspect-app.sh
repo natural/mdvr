@@ -50,8 +50,8 @@ icon=$(plutil -extract CFBundleIconFile raw -o - "$plist")
 [ "$icon" = AppIcon ] || fail "CFBundleIconFile is not AppIcon: $icon"
 [ -f "$contents/Resources/AppIcon.icns" ] || fail "bundle icon missing"
 [ -f "$contents/Resources/LICENSE" ] || fail "project license missing"
-[ -f "$contents/Resources/THIRD_PARTY_NOTICES.md" ] || fail "third-party notices missing"
-! grep -q '| missing |' "$contents/Resources/THIRD_PARTY_NOTICES.md" || fail "third-party license text missing"
+[ -f "$contents/Resources/third-party-notices.md" ] || fail "third-party notices missing"
+! grep -q '| missing |' "$contents/Resources/third-party-notices.md" || fail "third-party license text missing"
 file "$contents/Resources/AppIcon.icns" | grep -q 'Mac OS X icon' || fail "bundle icon is invalid"
 plutil -extract CFBundleDocumentTypes xml1 -o /dev/null "$plist" >/dev/null 2>&1 || fail "Markdown file association missing"
 if plutil -extract CFBundleURLTypes xml1 -o /dev/null "$plist" >/dev/null 2>&1; then

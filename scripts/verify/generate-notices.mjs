@@ -107,5 +107,5 @@ for (const item of packages)
   output += `| ${item.ecosystem} | ${item.name.replaceAll("|", "\\|")} | ${item.version} | ${String(item.license).replaceAll("|", "\\|")} | ${item.notice ? "included below" : "missing"} |\n`;
 for (const item of packages.filter((item) => item.notice))
   output += `\n## ${item.ecosystem}: ${item.name} ${item.version}\n\nDeclared license: ${item.license}\n\n\`\`\`text\n${item.notice.replaceAll("```", "` ` `")}\n\`\`\`\n`;
-await Bun.write(join(repo, "THIRD_PARTY_NOTICES.md"), output);
+await Bun.write(join(repo, "third-party-notices.md"), output);
 console.log(`wrote ${packages.length} dependency notices`);

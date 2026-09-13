@@ -25,7 +25,7 @@ and `@types/dompurify` 3.2.0 (MIT). They are not renderer runtime assets.
 Mermaid brings its own locked runtime dependency graph, including parser,
 Chevrotain, D3, Cytoscape, ELK, KaTeX, and DOMPurify packages. Their versions,
 integrity hashes, and dependency relationships are recorded in `bun.lock`.
-`THIRD_PARTY_NOTICES.md` deterministically inventories 124 installed web packages
+`third-party-notices.md` deterministically inventories 124 installed web packages
 and 107 Cargo packages in pinned `reqwest` and `ignore` runtime graphs. Every listed
 package includes discovered license/notice text with zero missing files.
 
@@ -65,7 +65,7 @@ bun test tests
 bun run build
 cd ..
 bun scripts/verify/generate-notices.mjs
-! grep -q '| missing |' THIRD_PARTY_NOTICES.md
+! grep -q '| missing |' third-party-notices.md
 ```
 
 Inspect resolved metadata and license files before release:
