@@ -163,10 +163,16 @@ pub struct Preferences {
     pub theme: Option<String>,
     #[serde(default)]
     pub theme_file: Option<PathBuf>,
+    #[serde(default = "default_use_zed_config")]
+    pub use_zed_config: bool,
     #[serde(default = "default_text_scale")]
     pub text_scale_percent: u16,
     #[serde(default)]
     pub window: WindowGeometry,
+}
+
+fn default_use_zed_config() -> bool {
+    true
 }
 
 fn default_text_scale() -> u16 {
@@ -182,6 +188,7 @@ impl Default for Preferences {
             reading_locator: None,
             theme: None,
             theme_file: None,
+            use_zed_config: true,
             text_scale_percent: DEFAULT_TEXT_SCALE_PERCENT,
             window: WindowGeometry::default(),
         }

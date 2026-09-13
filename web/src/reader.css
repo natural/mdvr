@@ -8,6 +8,10 @@
   --reader-focus: var(--reader-accent);
   --reader-scale: 1;
   --reader-color-scheme: light dark;
+  --reader-ui-font: system-ui;
+  --reader-code-font: ui-monospace;
+  --reader-ui-size: 16px;
+  --reader-code-size: 0.9em;
   --syntax-keyword-foreground: inherit;
   --syntax-string-foreground: inherit;
   --syntax-comment-foreground: inherit;
@@ -41,7 +45,8 @@
   --syntax-operator-style: normal;
   --syntax-punctuation-style: normal;
   font:
-    calc(16px * var(--reader-scale)) / 1.6 system-ui,
+    calc(var(--reader-ui-size) * var(--reader-scale)) / 1.6
+    var(--reader-ui-font),
     sans-serif;
 }
 
@@ -70,7 +75,9 @@ body {
 
 .reader pre,
 .reader code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family:
+    var(--reader-code-font), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--reader-code-size);
 }
 
 .reader .code-copy {

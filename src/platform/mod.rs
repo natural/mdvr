@@ -26,6 +26,7 @@ use crate::{
         MAX_FRAME_BYTES, Message, ResourceResult, decode, encode,
     },
     platform::bridge::{BridgeContext, BridgeMessage, BridgeRouter},
+    theme::ZedFonts,
 };
 use cocoa::{
     appkit::NSView,
@@ -362,6 +363,7 @@ struct PendingPage {
     theme_choices: Option<String>,
     history: Option<String>,
     locator: Option<PendingLocator>,
+    fonts: Option<String>,
 }
 
 #[derive(Default)]
@@ -375,6 +377,7 @@ struct PendingPageState {
     theme_choices: Option<String>,
     history: Option<String>,
     locator: Option<PendingLocator>,
+    fonts: Option<String>,
 }
 
 impl PendingPageState {
@@ -388,6 +391,7 @@ impl PendingPageState {
         self.theme_choices = None;
         self.history = None;
         self.locator = None;
+        self.fonts = None;
     }
 
     fn page_ready(&self) -> bool {
@@ -491,6 +495,7 @@ impl PendingPageState {
             theme_choices: self.theme_choices.take(),
             history: self.history.take(),
             locator: self.locator.take(),
+            fonts: self.fonts.take(),
         }
     }
 
@@ -507,6 +512,9 @@ impl PendingPageState {
             evaluate_javascript(web_view, &script);
         }
         if let Some(script) = pending.history {
+            evaluate_javascript(web_view, &script);
+        }
+        if let Some(script) = pending.fonts {
             evaluate_javascript(web_view, &script);
         }
         if let Some(appearance) = pending.appearance {
@@ -621,6 +629,16 @@ fn locator_script(locator: &Locator) -> Result<String, serde_json::Error> {
     Ok(format!(
         "window.mdvrRestoreLocator({});",
         serde_json::to_string(locator)?
+    ))
+}
+
+fn fonts_script(fonts: &ZedFonts) -> Result<String, serde_json::Error> {
+    Ok(format!(
+        "window.mdvrSetFonts({},{},{},{});",
+        serde_json::to_string(&fonts.ui_family)?,
+        serde_json::to_string(&fonts.buffer_family)?,
+        serde_json::to_string(&fonts.ui_size)?,
+        serde_json::to_string(&fonts.buffer_size)?,
     ))
 }
 
@@ -834,6 +852,18 @@ impl EmbeddedWebView {
             evaluate_javascript(&self.view, &script);
         } else {
             self.pending_state.history = Some(script);
+        }
+    }
+
+    pub fn set_fonts(&mut self, fonts: &ZedFonts) {
+        assert!(main_thread(), "Wry WebView must be used on main thread");
+        let Ok(script) = fonts_script(fonts) else {
+            return;
+        };
+        if self.pending_state.page_ready() {
+            evaluate_javascript(&self.view, &script);
+        } else {
+            self.pending_state.fonts = Some(script);
         }
     }
 

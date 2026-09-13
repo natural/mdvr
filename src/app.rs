@@ -55,7 +55,9 @@ use crate::{
         DisplayBounds, LaunchIntent, Preferences, ReadingLocator, WindowGeometry,
         conventional_path, load_or_default, resolve_launch, save,
     },
-    theme::{AppearanceMode, ThemeFamily, default_theme, import_file},
+    theme::{
+        AppearanceMode, Theme, ThemeFamily, ZedFonts, default_theme, import_file, load_zed_config,
+    },
     ui::{FocusOwner, ShellCommand, ShellState},
 };
 
@@ -305,6 +307,11 @@ struct MdvrView {
     picker_return: bool,
     startup_error: Option<String>,
     theme_family: Option<ThemeFamily>,
+    zed_theme: Option<Theme>,
+    zed_fonts: Option<ZedFonts>,
+    loading_document: bool,
+    initial_load_task: Option<Task<()>>,
+    navigation_load_task: Option<Task<()>>,
     render_started: Option<Instant>,
     initialized: bool,
     remote_consent: Option<(crate::contracts::DocumentId, bool)>,
@@ -337,6 +344,11 @@ impl MdvrView {
             picker_return: false,
             startup_error: None,
             theme_family: None,
+            zed_theme: None,
+            zed_fonts: None,
+            loading_document: false,
+            initial_load_task: None,
+            navigation_load_task: None,
             render_started: None,
             initialized: false,
             remote_consent: None,
@@ -386,11 +398,24 @@ impl MdvrView {
         self.initialized = true;
         self.shell.text_scale_percent = self.preferences.text_scale_percent;
         self.pending_initial_locator = launch.state.reading_locator.clone();
+        let zed = self
+            .preferences
+            .use_zed_config
+            .then(load_zed_config)
+            .flatten();
+        self.zed_theme = zed.as_ref().and_then(|config| config.theme.clone());
+        self.zed_fonts = zed.map(|config| config.fonts);
         self.theme_family = self
             .preferences
             .theme_file
             .as_deref()
-            .and_then(|path| import_file(path).ok());
+            .and_then(|path| import_file(path).ok())
+            .or_else(|| {
+                self.zed_theme.clone().map(|theme| ThemeFamily {
+                    name: "Zed theme".into(),
+                    members: vec![theme],
+                })
+            });
         if let Some(path) = missing_dock_document(launch, &self.preferences) {
             self.failed_path = Some(path.clone());
             self.report_error(format!(
@@ -408,20 +433,15 @@ impl MdvrView {
             .document
             .as_deref()
             .expect("document checked above");
-        match load_source(path, false) {
-            Ok(source) => self.attach_initial_source(source, window, cx),
-            Err(LoadError::NeedsConfirmation { path, bytes }) => {
-                self.pending_large = Some((path, bytes));
-                window.focus(&self.picker_focus);
-                cx.notify();
-            }
-            Err(error) => {
-                self.failed_path = Some(path.to_path_buf());
-                self.report_error(format!("Cannot load {}: {error}", path.display()));
-                window.focus(&self.picker_focus);
-                cx.notify();
-            }
-        }
+        self.loading_document = true;
+        let path = path.to_path_buf();
+        let task = cx.background_spawn(async move { load_source(&path, false) });
+        self.initial_load_task = Some(cx.spawn_in(window, async move |view, cx| {
+            let result = task.await;
+            let _ = cx.update(|window, app| {
+                view.update(app, |view, cx| view.finish_initial_load(result, window, cx))
+            });
+        }));
     }
 
     fn start_discovery(&mut self, cx: &mut Context<Self>) {
@@ -547,6 +567,38 @@ impl MdvrView {
             }
         }
         cx.notify();
+    }
+
+    fn finish_initial_load(
+        &mut self,
+        result: Result<LoadedSource, LoadError>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.loading_document = false;
+        self.initial_load_task = None;
+        match result {
+            Ok(source) => self.attach_initial_source(source, window, cx),
+            Err(LoadError::NeedsConfirmation { path, bytes }) => {
+                self.pending_large = Some((path, bytes));
+                window.focus(&self.picker_focus);
+                cx.notify();
+            }
+            Err(error) => {
+                let path = match &error {
+                    LoadError::Missing(path)
+                    | LoadError::Unreadable(path)
+                    | LoadError::NotAFile(path)
+                    | LoadError::InvalidUtf8(path)
+                    | LoadError::TooLarge { path, .. } => path.clone(),
+                    LoadError::NeedsConfirmation { path, .. } => path.clone(),
+                };
+                self.failed_path = Some(path.clone());
+                self.report_error(format!("Cannot load {}: {error}", path.display()));
+                window.focus(&self.picker_focus);
+                cx.notify();
+            }
+        }
     }
 
     fn attach_initial_source(
@@ -711,11 +763,16 @@ impl MdvrView {
     }
 
     fn update_appearance(&mut self, window: &Window) {
-        let selected_theme = self.preferences.theme.as_deref().and_then(|name| {
-            self.theme_family
-                .as_ref()
-                .and_then(|family| family.member(name))
-        });
+        let selected_theme = self
+            .preferences
+            .theme
+            .as_deref()
+            .and_then(|name| {
+                self.theme_family
+                    .as_ref()
+                    .and_then(|family| family.member(name))
+            })
+            .or(self.zed_theme.as_ref());
         let mode = selected_theme.map_or_else(
             || match self.preferences.theme.as_deref() {
                 Some("light") => AppearanceMode::Light,
@@ -742,6 +799,9 @@ impl MdvrView {
                 })
                 .unwrap_or_default();
             web_view.set_theme_choices(&names, self.preferences.theme.as_deref());
+            if let Some(fonts) = self.zed_fonts.as_ref() {
+                web_view.set_fonts(fonts);
+            }
         }
         if self.appearance_mode == Some(mode) {
             return;
@@ -1232,7 +1292,24 @@ impl MdvrView {
 
     fn load_navigation(&mut self, request: LoadRequest, cx: &mut Context<Self>) {
         let path = request.path.clone();
-        let source = match load_source(&path, false) {
+        let task = cx.background_spawn(async move { load_source(&path, false) });
+        self.navigation_load_task = Some(cx.spawn(async move |view, cx| {
+            let result = task.await;
+            let _ = view.update(cx, |view, cx| {
+                view.finish_navigation_load(request, result, cx)
+            });
+        }));
+    }
+
+    fn finish_navigation_load(
+        &mut self,
+        request: LoadRequest,
+        result: Result<LoadedSource, LoadError>,
+        cx: &mut Context<Self>,
+    ) {
+        self.navigation_load_task = None;
+        let path = request.path.clone();
+        let source = match result {
             Ok(source) => source,
             Err(LoadError::NeedsConfirmation { path, bytes })
                 if confirm_large_document(&path, bytes) =>
@@ -1409,6 +1486,8 @@ impl Drop for MdvrView {
         }
         let _ = self.reload_task.take();
         let _ = self.discovery_task.take();
+        let _ = self.initial_load_task.take();
+        let _ = self.navigation_load_task.take();
         let _ = &self.bridge_task;
     }
 }
@@ -1419,6 +1498,9 @@ impl Render for MdvrView {
         if self.initialized {
             self.update_appearance(window);
             self.capture_window_geometry(window);
+        }
+        if self.loading_document {
+            return div().size_full().bg(gpui::rgb(0x202124)).into_any_element();
         }
         if let Some(web_view) = self.web_view.as_ref() {
             web_view.sync_frame();
@@ -1471,12 +1553,6 @@ impl Render for MdvrView {
             .gap_2()
             .bg(gpui::rgb(0x202124))
             .text_color(gpui::rgb(0xf1f3f4))
-            .child(
-                div()
-                    .text_color(gpui::rgb(0xffffff))
-                    .text_xl()
-                    .child("Choose a Markdown file"),
-            )
             .child(
                 div()
                     .text_color(gpui::rgb(0xb0b3b8))
@@ -1617,6 +1693,11 @@ impl PreferencesView {
         self.save();
     }
 
+    fn toggle_zed_config(&mut self) {
+        self.preferences.use_zed_config = !self.preferences.use_zed_config;
+        self.save();
+    }
+
     fn cycle_theme(&mut self) {
         self.preferences.theme = match self.preferences.theme.as_deref() {
             None => Some("light".into()),
@@ -1640,6 +1721,24 @@ impl Render for PreferencesView {
             .text_color(gpui::rgb(0xf1f3f4))
             .child(div().text_xl().child("Preferences"))
             .child(div().child(format!("Theme: {theme}")))
+            .child(
+                div()
+                    .id("preferences-zed-config")
+                    .px_3()
+                    .py_2()
+                    .rounded_sm()
+                    .cursor_pointer()
+                    .bg(gpui::rgb(0x3c4043))
+                    .child(format!(
+                        "Use Zed theme/fonts: {}",
+                        if self.preferences.use_zed_config {
+                            "On"
+                        } else {
+                            "Off"
+                        }
+                    ))
+                    .on_click(cx.listener(|view, _, _, _| view.toggle_zed_config())),
+            )
             .child(
                 div()
                     .flex()
@@ -1808,6 +1907,7 @@ fn open_mdvr_window(cx: &mut App, launch: LaunchPlan, announce: bool) {
     match cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
+            titlebar: None,
             ..WindowOptions::default()
         },
         move |_window, cx| {

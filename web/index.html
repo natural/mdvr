@@ -74,6 +74,13 @@
     <main id="document" class="reader" aria-live="polite" tabindex="0">Loading document…</main>
     <script nonce="mdvr-fixture">
       (() => {
+        window.mdvrSetFonts = (uiFamily, codeFamily, uiSize, codeSize) => {
+          const root = document.documentElement;
+          if (uiFamily) root.style.setProperty("--reader-ui-font", uiFamily);
+          if (codeFamily) root.style.setProperty("--reader-code-font", codeFamily);
+          if (Number.isFinite(uiSize)) root.style.setProperty("--reader-ui-size", `${uiSize}px`);
+          if (Number.isFinite(codeSize)) root.style.setProperty("--reader-code-size", `${codeSize}px`);
+        };
         let nextRequestId = 1;
         const validBridgeAction = (action) => {
           if (!action || typeof action !== 'object' || typeof action.kind !== 'string') return false;

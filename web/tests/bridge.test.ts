@@ -66,6 +66,12 @@ test("narrow layout hides outline and keeps toolbar clear of content", () => {
   expect(readerCss).toContain("padding: 7rem 1rem 1rem");
 });
 
+test("Zed font settings map to safe reader variables", () => {
+  expect(html).toContain("window.mdvrSetFonts");
+  expect(html).toContain('"--reader-ui-font"');
+  expect(html).toContain('"--reader-code-font"');
+});
+
 test("native errors use bounded dismissible text-only status", () => {
   expect(html).toContain('id="status" role="alert" hidden');
   expect(html).toContain("window.mdvrShowError");
