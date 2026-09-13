@@ -25,6 +25,15 @@ pub const MAX_WINDOW_HEIGHT: u32 = 10_000;
 pub const MIN_SCREEN_COORDINATE: i32 = -100_000;
 pub const MAX_SCREEN_COORDINATE: i32 = 100_000;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ToolbarVisibility {
+    Hide,
+    Show,
+    #[default]
+    ShowOnScroll,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PreferencesError {
     Io(String),
@@ -165,6 +174,8 @@ pub struct Preferences {
     pub theme_file: Option<PathBuf>,
     #[serde(default = "default_use_zed_config")]
     pub use_zed_config: bool,
+    #[serde(default)]
+    pub toolbar_visibility: ToolbarVisibility,
     #[serde(default = "default_text_scale")]
     pub text_scale_percent: u16,
     #[serde(default)]
@@ -189,6 +200,7 @@ impl Default for Preferences {
             theme: None,
             theme_file: None,
             use_zed_config: true,
+            toolbar_visibility: ToolbarVisibility::default(),
             text_scale_percent: DEFAULT_TEXT_SCALE_PERCENT,
             window: WindowGeometry::default(),
         }

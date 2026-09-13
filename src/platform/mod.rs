@@ -26,6 +26,7 @@ use crate::{
         MAX_FRAME_BYTES, Message, ResourceResult, decode, encode,
     },
     platform::bridge::{BridgeContext, BridgeMessage, BridgeRouter},
+    preferences::ToolbarVisibility,
     theme::ZedFonts,
 };
 use cocoa::{
@@ -364,6 +365,7 @@ struct PendingPage {
     history: Option<String>,
     locator: Option<PendingLocator>,
     fonts: Option<String>,
+    toolbar: Option<String>,
 }
 
 #[derive(Default)]
@@ -378,6 +380,7 @@ struct PendingPageState {
     history: Option<String>,
     locator: Option<PendingLocator>,
     fonts: Option<String>,
+    toolbar: Option<String>,
 }
 
 impl PendingPageState {
@@ -392,6 +395,7 @@ impl PendingPageState {
         self.history = None;
         self.locator = None;
         self.fonts = None;
+        self.toolbar = None;
     }
 
     fn page_ready(&self) -> bool {
@@ -496,6 +500,7 @@ impl PendingPageState {
             history: self.history.take(),
             locator: self.locator.take(),
             fonts: self.fonts.take(),
+            toolbar: self.toolbar.take(),
         }
     }
 
@@ -515,6 +520,9 @@ impl PendingPageState {
             evaluate_javascript(web_view, &script);
         }
         if let Some(script) = pending.fonts {
+            evaluate_javascript(web_view, &script);
+        }
+        if let Some(script) = pending.toolbar {
             evaluate_javascript(web_view, &script);
         }
         if let Some(appearance) = pending.appearance {
@@ -630,6 +638,14 @@ fn locator_script(locator: &Locator) -> Result<String, serde_json::Error> {
         "window.mdvrRestoreLocator({});",
         serde_json::to_string(locator)?
     ))
+}
+
+fn toolbar_script(visibility: ToolbarVisibility) -> &'static str {
+    match visibility {
+        ToolbarVisibility::Hide => "window.mdvrSetToolbarVisibility('hide');",
+        ToolbarVisibility::Show => "window.mdvrSetToolbarVisibility('show');",
+        ToolbarVisibility::ShowOnScroll => "window.mdvrSetToolbarVisibility('show-on-scroll');",
+    }
 }
 
 fn fonts_script(fonts: &ZedFonts) -> Result<String, serde_json::Error> {
@@ -852,6 +868,16 @@ impl EmbeddedWebView {
             evaluate_javascript(&self.view, &script);
         } else {
             self.pending_state.history = Some(script);
+        }
+    }
+
+    pub fn set_toolbar_visibility(&mut self, visibility: ToolbarVisibility) {
+        assert!(main_thread(), "Wry WebView must be used on main thread");
+        let script = toolbar_script(visibility).to_owned();
+        if self.pending_state.page_ready() {
+            evaluate_javascript(&self.view, &script);
+        } else {
+            self.pending_state.toolbar = Some(script);
         }
     }
 

@@ -66,6 +66,12 @@ test("narrow layout hides outline and keeps toolbar clear of content", () => {
   expect(readerCss).toContain("padding: 7rem 1rem 1rem");
 });
 
+test("toolbar visibility supports hide, show, and scroll modes", () => {
+  expect(html).toContain("window.mdvrSetToolbarVisibility");
+  expect(html).toContain('data-toolbar-hidden="true"');
+  expect(html).toContain('"show-on-scroll"');
+});
+
 test("Zed font settings map to safe reader variables", () => {
   expect(html).toContain("window.mdvrSetFonts");
   expect(html).toContain('"--reader-ui-font"');

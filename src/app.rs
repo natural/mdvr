@@ -23,6 +23,7 @@ actions!(
         OpenFileAction,
         OpenFolderAction,
         ShowPreferences,
+        ShowPicker,
         QuitApp,
         AboutMdvr
     ]
@@ -52,8 +53,8 @@ use crate::{
         update_bridge_context,
     },
     preferences::{
-        DisplayBounds, LaunchIntent, Preferences, ReadingLocator, WindowGeometry,
-        conventional_path, load_or_default, resolve_launch, save,
+        DisplayBounds, LaunchIntent, Preferences, ReadingLocator, ToolbarVisibility,
+        WindowGeometry, conventional_path, load_or_default, resolve_launch, save,
     },
     theme::{
         AppearanceMode, Theme, ThemeFamily, ZedFonts, default_theme, import_file, load_zed_config,
@@ -802,6 +803,7 @@ impl MdvrView {
             if let Some(fonts) = self.zed_fonts.as_ref() {
                 web_view.set_fonts(fonts);
             }
+            web_view.set_toolbar_visibility(self.preferences.toolbar_visibility);
         }
         if self.appearance_mode == Some(mode) {
             return;
@@ -1693,6 +1695,15 @@ impl PreferencesView {
         self.save();
     }
 
+    fn cycle_toolbar_visibility(&mut self) {
+        self.preferences.toolbar_visibility = match self.preferences.toolbar_visibility {
+            ToolbarVisibility::ShowOnScroll => ToolbarVisibility::Show,
+            ToolbarVisibility::Show => ToolbarVisibility::Hide,
+            ToolbarVisibility::Hide => ToolbarVisibility::ShowOnScroll,
+        };
+        self.save();
+    }
+
     fn toggle_zed_config(&mut self) {
         self.preferences.use_zed_config = !self.preferences.use_zed_config;
         self.save();
@@ -1721,6 +1732,25 @@ impl Render for PreferencesView {
             .text_color(gpui::rgb(0xf1f3f4))
             .child(div().text_xl().child("Preferences"))
             .child(div().child(format!("Theme: {theme}")))
+            .child(div().child(format!(
+                "Toolbar: {}",
+                match self.preferences.toolbar_visibility {
+                    ToolbarVisibility::Hide => "Hidden",
+                    ToolbarVisibility::Show => "Always shown",
+                    ToolbarVisibility::ShowOnScroll => "Show on scroll",
+                }
+            )))
+            .child(
+                div()
+                    .id("preferences-toolbar")
+                    .px_3()
+                    .py_2()
+                    .rounded_sm()
+                    .cursor_pointer()
+                    .bg(gpui::rgb(0x3c4043))
+                    .child("Cycle toolbar visibility")
+                    .on_click(cx.listener(|view, _, _, _| view.cycle_toolbar_visibility())),
+            )
             .child(
                 div()
                     .id("preferences-zed-config")
@@ -1811,6 +1841,12 @@ fn open_file_action(_: &OpenFileAction, cx: &mut App) {
         view.pending_open.push_back(OpenRequest { path, ack: None });
         cx.notify();
     });
+}
+
+fn show_picker_action(_: &ShowPicker, cx: &mut App) {
+    if let Some(window) = active_mdvr_window(cx) {
+        let _ = window.update(cx, |view, _, cx| view.open_document_picker(cx));
+    }
 }
 
 fn open_folder_action(_: &OpenFolderAction, cx: &mut App) {
@@ -1956,9 +1992,17 @@ pub fn run(launch: LaunchPlan) {
     application.run(move |cx: &mut App| {
         cx.on_action(open_file_action);
         cx.on_action(open_folder_action);
+        cx.on_action(show_picker_action);
         cx.on_action(show_preferences);
         cx.on_action(quit_app);
         cx.on_action(about_mdvr);
+        cx.bind_keys([
+            gpui::KeyBinding::new("cmd-o", OpenFileAction, None),
+            gpui::KeyBinding::new("cmd-shift-o", OpenFolderAction, None),
+            gpui::KeyBinding::new("cmd-p", ShowPicker, None),
+            gpui::KeyBinding::new("cmd-,", ShowPreferences, None),
+            gpui::KeyBinding::new("cmd-q", QuitApp, None),
+        ]);
         cx.set_menus(vec![
             Menu {
                 name: "mdvr".into(),
@@ -1975,6 +2019,8 @@ pub fn run(launch: LaunchPlan) {
                 items: vec![
                     MenuItem::action("Open File…", OpenFileAction),
                     MenuItem::action("Open Folder…", OpenFolderAction),
+                    MenuItem::separator(),
+                    MenuItem::action("Browse Files", ShowPicker),
                 ],
             },
         ]);
