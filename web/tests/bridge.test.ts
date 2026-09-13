@@ -76,10 +76,17 @@ test("renderer contains no titlebar toolbar", () => {
   expect(html).not.toContain("window.mdvrSetToolbarIcons");
 });
 
-test("Zed font settings map to safe reader variables", () => {
+test("Zed fonts reset cleanly and style headings", () => {
   expect(html).toContain("window.mdvrSetFonts");
-  expect(html).toContain('"--reader-ui-font"');
-  expect(html).toContain('"--reader-code-font"');
+  expect(html).toContain('uiFamily || "system-ui"');
+  expect(html).toContain('codeFamily || "ui-monospace"');
+  expect(readerCss).toContain("color: var(--reader-accent)");
+  expect(readerCss).toContain("font-family: var(--reader-ui-font)");
+});
+
+test("code copy uses an icon with an accessible label", () => {
+  expect(main).toContain('button.textContent = "⧉"');
+  expect(main).toContain('button.setAttribute("aria-label", "Copy code")');
 });
 
 test("native errors use bounded dismissible text-only status", () => {

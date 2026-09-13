@@ -31,8 +31,8 @@ use crate::{
 use block2::RcBlock;
 use cocoa::{
     appkit::{NSEventMask, NSEventModifierFlags, NSView},
-    base::{BOOL, id, nil},
-    foundation::NSString,
+    base::{BOOL, NO, YES, id, nil},
+    foundation::{NSPoint, NSRect, NSSize, NSString},
 };
 use gpui::Window;
 use objc::{class, msg_send, sel, sel_impl};
@@ -150,6 +150,161 @@ pub(crate) fn install_close_shortcut() {
             addLocalMonitorForEventsMatchingMask: NSEventMask::NSKeyDownMask.bits()
             handler: &*handler
         ];
+    }
+}
+
+pub(crate) struct NativePreferencesControls {
+    container: id,
+    zed: id,
+    theme: id,
+    scale: id,
+    scale_label: id,
+    themes: Vec<Option<String>>,
+}
+
+impl NativePreferencesControls {
+    pub(crate) fn attach(
+        window: &Window,
+        use_zed: bool,
+        theme: Option<&str>,
+        scale: u16,
+        themes: Vec<Option<String>>,
+    ) -> Option<Self> {
+        let handle = HasWindowHandle::window_handle(window).ok()?;
+        let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+            return None;
+        };
+        unsafe {
+            let native_view = handle.ns_view.as_ptr() as id;
+            let frame: NSRect = msg_send![native_view, bounds];
+            let container: id = msg_send![class!(NSView), alloc];
+            let container: id = msg_send![container, initWithFrame: frame];
+            let _: () = msg_send![container, setAutoresizingMask: 18_u64];
+            let _: () = msg_send![container, setWantsLayer: YES];
+            let layer: id = msg_send![container, layer];
+            let color: id = msg_send![class!(NSColor), windowBackgroundColor];
+            let cg_color: id = msg_send![color, CGColor];
+            let _: () = msg_send![layer, setBackgroundColor: cg_color];
+            let _: () = msg_send![native_view, addSubview: container];
+
+            let label = |text: &str, frame: NSRect| {
+                let value = NSString::alloc(nil).init_str(text);
+                let control: id = msg_send![class!(NSTextField), labelWithString: value];
+                let _: () = msg_send![control, setFrame: frame];
+                let _: () = msg_send![container, addSubview: control];
+                let _: () = msg_send![value, release];
+                control
+            };
+            label(
+                "Appearance",
+                NSRect::new(NSPoint::new(24., 184.), NSSize::new(120., 22.)),
+            );
+            label(
+                "Theme",
+                NSRect::new(NSPoint::new(24., 143.), NSSize::new(90., 22.)),
+            );
+            label(
+                "Text size",
+                NSRect::new(NSPoint::new(24., 62.), NSSize::new(90., 22.)),
+            );
+
+            let zed: id = msg_send![class!(NSButton), alloc];
+            let zed: id = msg_send![zed, initWithFrame: NSRect::new(NSPoint::new(20., 101.), NSSize::new(300., 24.))];
+            let title = NSString::alloc(nil).init_str("Use Zed theme and fonts");
+            let _: () = msg_send![zed, setButtonType: 3_u64];
+            let _: () = msg_send![zed, setTitle: title];
+            let _: () = msg_send![zed, setState: if use_zed { 1_isize } else { 0_isize }];
+            let _: () = msg_send![container, addSubview: zed];
+            let _: () = msg_send![zed, release];
+            let _: () = msg_send![title, release];
+
+            let theme_control: id = msg_send![class!(NSPopUpButton), alloc];
+            let theme_control: id = msg_send![theme_control, initWithFrame: NSRect::new(NSPoint::new(114., 138.), NSSize::new(280., 30.)) pullsDown: NO];
+            for name in &themes {
+                let label = match name.as_deref() {
+                    None => "System",
+                    Some("light") => "Light",
+                    Some("dark") => "Dark",
+                    Some(name) => name,
+                };
+                let title = NSString::alloc(nil).init_str(label);
+                let _: () = msg_send![theme_control, addItemWithTitle: title];
+                let _: () = msg_send![title, release];
+            }
+            let selected = themes
+                .iter()
+                .position(|value| value.as_deref() == theme)
+                .unwrap_or(0);
+            let _: () = msg_send![theme_control, selectItemAtIndex: selected as isize];
+            let _: () = msg_send![container, addSubview: theme_control];
+            let _: () = msg_send![theme_control, release];
+
+            let slider: id = msg_send![class!(NSSlider), alloc];
+            let slider: id = msg_send![slider, initWithFrame: NSRect::new(NSPoint::new(114., 57.), NSSize::new(220., 28.))];
+            let _: () = msg_send![slider, setMinValue: 50_f64];
+            let _: () = msg_send![slider, setMaxValue: 300_f64];
+            let _: () = msg_send![slider, setDoubleValue: f64::from(scale)];
+            let _: () = msg_send![slider, setContinuous: YES];
+            let _: () = msg_send![container, addSubview: slider];
+            let _: () = msg_send![slider, release];
+            let scale_label = label(
+                &format!("{scale}%"),
+                NSRect::new(NSPoint::new(346., 62.), NSSize::new(56., 22.)),
+            );
+
+            Some(Self {
+                container,
+                zed,
+                theme: theme_control,
+                scale: slider,
+                scale_label,
+                themes,
+            })
+        }
+    }
+
+    pub(crate) fn sync(&self, use_zed: bool, theme: Option<&str>, scale: u16) {
+        unsafe {
+            let _: () = msg_send![self.zed, setState: if use_zed { 1_isize } else { 0_isize }];
+            if let Some(selected) = self
+                .themes
+                .iter()
+                .position(|value| value.as_deref() == theme)
+            {
+                let _: () = msg_send![self.theme, selectItemAtIndex: selected as isize];
+            }
+            let _: () = msg_send![self.scale, setDoubleValue: f64::from(scale)];
+        }
+    }
+
+    pub(crate) fn values(&self) -> (bool, Option<String>, u16) {
+        unsafe {
+            let zed: isize = msg_send![self.zed, state];
+            let selected: isize = msg_send![self.theme, indexOfSelectedItem];
+            let scale: f64 = msg_send![self.scale, doubleValue];
+            let scale = scale.round().clamp(50., 300.) as u16;
+            let value = NSString::alloc(nil).init_str(&format!("{scale}%"));
+            let _: () = msg_send![self.scale_label, setStringValue: value];
+            let _: () = msg_send![value, release];
+            (
+                zed != 0,
+                usize::try_from(selected)
+                    .ok()
+                    .and_then(|index| self.themes.get(index))
+                    .cloned()
+                    .flatten(),
+                scale,
+            )
+        }
+    }
+}
+
+impl Drop for NativePreferencesControls {
+    fn drop(&mut self) {
+        unsafe {
+            let _: () = msg_send![self.container, removeFromSuperview];
+            let _: () = msg_send![self.container, release];
+        }
     }
 }
 

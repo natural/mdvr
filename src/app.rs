@@ -49,7 +49,7 @@ use crate::{
     },
     navigation::{LoadRequest, Locator, NavigationAction, NavigationState},
     platform::{
-        EmbeddedWebView, begin_window_drag,
+        EmbeddedWebView, NativePreferencesControls, begin_window_drag,
         bridge::{BridgeContext, BridgeMessage},
         confirm_large_document, confirm_outside_resource, confirm_remote_images, file_url_path,
         install_close_shortcut, open_external_url, open_local_file, perform_redo, perform_undo,
@@ -426,12 +426,16 @@ struct TextTooltip {
 impl Render for TextTooltip {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .relative()
+            .top(px(-12.0))
+            .h(px(18.0))
             .px_2()
-            .py_1()
+            .flex()
+            .items_center()
             .rounded_sm()
             .bg(self.palette.control)
             .text_color(self.palette.foreground)
-            .text_sm()
+            .text_xs()
             .child(self.text)
     }
 }
@@ -493,6 +497,9 @@ impl MdvrView {
                 view.theme_family = Some(shared.theme_family);
                 view.zed_theme = shared.zed_theme;
                 view.zed_fonts = shared.zed_fonts;
+                if let Some(web_view) = view.web_view.as_mut() {
+                    web_view.set_fonts(view.zed_fonts.as_ref().unwrap_or(&ZedFonts::default()));
+                }
                 view.appearance_mode = None;
                 cx.notify();
             }
@@ -1009,9 +1016,7 @@ impl MdvrView {
                 })
                 .unwrap_or_default();
             web_view.set_theme_choices(&names, self.preferences.theme.as_deref());
-            if let Some(fonts) = self.zed_fonts.as_ref() {
-                web_view.set_fonts(fonts);
-            }
+            web_view.set_fonts(self.zed_fonts.as_ref().unwrap_or(&ZedFonts::default()));
         }
         let tokens = selected_theme
             .map(|theme| theme.tokens.clone())
@@ -2027,138 +2032,42 @@ impl Render for MdvrView {
 
 struct PreferencesView {
     preferences: Preferences,
+    controls: NativePreferencesControls,
     #[allow(dead_code)]
     preferences_subscription: Subscription,
-    status: Option<String>,
+    #[allow(dead_code)]
+    poll_task: Option<Task<()>>,
 }
 
 impl PreferencesView {
-    fn save(&mut self, cx: &mut Context<Self>) {
+    fn poll(&mut self, cx: &mut Context<Self>) {
+        let (use_zed, theme, scale) = self.controls.values();
+        if (use_zed, theme.as_deref(), scale)
+            == (
+                self.preferences.use_zed_config,
+                self.preferences.theme.as_deref(),
+                self.preferences.text_scale_percent,
+            )
+        {
+            return;
+        }
+        self.preferences.use_zed_config = use_zed;
+        self.preferences.theme = theme;
+        let _ = self.preferences.set_text_scale(scale);
         publish_preferences(cx, &self.preferences);
-        self.status = Some("Saved".into());
-        cx.notify();
-    }
-
-    fn adjust_scale(&mut self, delta: i16, cx: &mut Context<Self>) {
-        let next = (i32::from(self.preferences.text_scale_percent) + i32::from(delta))
-            .clamp(50, 300) as u16;
-        let _ = self.preferences.set_text_scale(next);
-        self.save(cx);
-    }
-
-    fn toggle_zed_config(&mut self, cx: &mut Context<Self>) {
-        self.preferences.use_zed_config = !self.preferences.use_zed_config;
-        self.save(cx);
-    }
-
-    fn cycle_theme(&mut self, cx: &mut Context<Self>) {
-        self.preferences.theme = match self.preferences.theme.as_deref() {
-            None => Some("light".into()),
-            Some("light") => Some("dark".into()),
-            Some("dark") => Some("Tokyo Night — Light".into()),
-            Some("Tokyo Night — Light") => Some("Tokyo Night — Dark".into()),
-            _ => None,
-        };
-        self.save(cx);
     }
 }
 
 impl Render for PreferencesView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_window_title("Preferences");
-        let theme = self.preferences.theme.as_deref().unwrap_or("system");
-        let shared = cx.global::<SharedPreferences>().clone();
-        let palette = ui_palette(&self.preferences, &shared, window);
+        let shared = cx.global::<SharedPreferences>();
         set_window_appearance(
             window,
             (self.preferences.theme.is_some() || shared.zed_theme.is_some())
-                .then_some(palette.dark),
+                .then_some(ui_palette(&self.preferences, shared, window).dark),
         );
-        let button = |id, label| {
-            div()
-                .id(id)
-                .px_3()
-                .py_2()
-                .rounded_sm()
-                .cursor_pointer()
-                .bg(palette.control)
-                .hover(move |style| style.bg(palette.selection))
-                .child(label)
-        };
-        let titlebar = div()
-            .h(px(MAIN_TITLEBAR_HEIGHT as f32))
-            .flex_shrink_0()
-            .flex()
-            .items_center()
-            .justify_end()
-            .pr_3()
-            .bg(palette.background)
-            .text_color(palette.foreground)
-            .border_b_1()
-            .border_color(palette.control)
-            .text_sm()
-            .on_mouse_down(MouseButton::Left, |_, window, _| begin_window_drag(window))
-            .child("Preferences");
-        let content = div()
-            .flex_1()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .p_6()
-            .bg(palette.background)
-            .text_color(palette.foreground)
-            .child(div().text_xl().child("Preferences"))
-            .child(div().child(format!("Theme: {theme}")))
-            .child(
-                button(
-                    "preferences-zed-config",
-                    format!(
-                        "Use Zed theme/fonts: {}",
-                        if self.preferences.use_zed_config {
-                            "On"
-                        } else {
-                            "Off"
-                        }
-                    ),
-                )
-                .on_click(cx.listener(|view, _, _, cx| view.toggle_zed_config(cx))),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(format!(
-                        "Text scale: {}%",
-                        self.preferences.text_scale_percent
-                    ))
-                    .child(
-                        button("preferences-scale-down", "−".into())
-                            .on_click(cx.listener(|view, _, _, cx| view.adjust_scale(-10, cx))),
-                    )
-                    .child(
-                        button("preferences-scale-up", "+".into())
-                            .on_click(cx.listener(|view, _, _, cx| view.adjust_scale(10, cx))),
-                    ),
-            )
-            .child(
-                button("preferences-theme", "Cycle theme".into())
-                    .on_click(cx.listener(|view, _, _, cx| view.cycle_theme(cx))),
-            )
-            .child(
-                div().opacity(0.65).child(
-                    self.status
-                        .clone()
-                        .unwrap_or_else(|| "Changes save automatically".into()),
-                ),
-            );
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(palette.background)
-            .child(titlebar)
-            .child(content)
+        div().size_full()
     }
 }
 
@@ -2278,34 +2187,67 @@ fn show_preferences(_: &ShowPreferences, cx: &mut App) {
     {
         return;
     }
-    let preferences = cx.global::<SharedPreferences>().preferences.clone();
+    let shared = cx.global::<SharedPreferences>().clone();
+    let preferences = shared.preferences.clone();
+    let mut themes = vec![None, Some("light".into()), Some("dark".into())];
+    for theme in &shared.theme_family.members {
+        let name = Some(theme.name.clone());
+        if !themes.contains(&name) {
+            themes.push(name);
+        }
+    }
     let _ = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
                 origin: point(px(300.0), px(200.0)),
-                size: size(px(420.0), px(280.0)),
+                size: size(px(430.0), px(250.0)),
             })),
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("Preferences".into()),
-                appears_transparent: true,
+                appears_transparent: false,
                 traffic_light_position: None,
             }),
-            is_resizable: true,
+            is_resizable: false,
             ..WindowOptions::default()
         },
-        move |_, cx| {
-            cx.new(|cx| {
+        move |window, cx| {
+            let controls = NativePreferencesControls::attach(
+                window,
+                preferences.use_zed_config,
+                preferences.theme.as_deref(),
+                preferences.text_scale_percent,
+                themes,
+            )
+            .expect("AppKit preferences controls");
+            let view = cx.new(|cx| {
                 let preferences_subscription =
                     cx.observe_global::<SharedPreferences>(|view: &mut PreferencesView, cx| {
                         view.preferences = cx.global::<SharedPreferences>().preferences.clone();
+                        view.controls.sync(
+                            view.preferences.use_zed_config,
+                            view.preferences.theme.as_deref(),
+                            view.preferences.text_scale_percent,
+                        );
                         cx.notify();
                     });
                 PreferencesView {
                     preferences,
+                    controls,
                     preferences_subscription,
-                    status: None,
+                    poll_task: None,
                 }
-            })
+            });
+            let poll_view = view.downgrade();
+            let poll_task = cx.spawn(async move |cx| {
+                loop {
+                    Timer::after(Duration::from_millis(100)).await;
+                    if poll_view.update(cx, |view, cx| view.poll(cx)).is_err() {
+                        return;
+                    }
+                }
+            });
+            view.update(cx, |view, _| view.poll_task = Some(poll_task));
+            view
         },
     );
 }
@@ -2358,9 +2300,18 @@ pub(crate) fn dock_launch(fallback: &LaunchPlan) -> LaunchPlan {
 }
 
 fn open_mdvr_window(cx: &mut App, launch: LaunchPlan, announce: bool) {
-    let geometry = conventional_path()
+    let parent_origin = cx.active_window().and_then(|window| {
+        window
+            .update(cx, |_, window, _| window.bounds().origin)
+            .ok()
+    });
+    let mut geometry = conventional_path()
         .map(|path| load_or_default(&path).preferences.window)
         .unwrap_or_default();
+    if let Some(origin) = parent_origin {
+        geometry.x = (origin.x / px(1.0)).round() as i32 + 24;
+        geometry.y = (origin.y / px(1.0)).round() as i32 + 24;
+    }
     let displays = cx
         .displays()
         .into_iter()

@@ -365,7 +365,8 @@ function installCodeCopy(model: RenderModel) {
         const button = document.createElement("button");
         button.className = "code-copy";
         button.type = "button";
-        button.textContent = "Copy";
+        button.textContent = "⧉";
+        button.title = "Copy code";
         button.setAttribute("aria-label", "Copy code");
         button.addEventListener("click", async () => {
             try {
@@ -379,7 +380,8 @@ function installCodeCopy(model: RenderModel) {
                 document.execCommand("copy");
                 selection?.removeAllRanges();
             }
-            button.textContent = "Copied";
+            button.textContent = "✓";
+            setTimeout(() => (button.textContent = "⧉"), 1200);
             (window as Window & { mdvrCopyCode?: () => void }).mdvrCopyCode?.();
         });
         code.parentElement?.before(button);

@@ -22,10 +22,19 @@ final class RendererProbe: NSObject, WKNavigationDelegate {
                 getSelection().removeAllRanges();
                 getSelection().addRange(range);
                 window.mdvrLoadDocument('# Inserted\\n\\n' + source, 2);
+                window.mdvrSetFonts('monospace', 'monospace', 19, 17);
+                window.mdvrApplyAppearance({
+                    mode: 'dark', scale_percent: 100,
+                    reader_background: '#1a1b26', reader_foreground: '#c0caf5',
+                    code_background: '#16161e', accent: '#7aa2f7', syntax: [],
+                });
+                const headingStyle = getComputedStyle(document.querySelector('#document h1'));
                 const selectionPreserved = getSelection().toString() === 'hello world';
                 const foundAcrossInlineNodes = window.mdvrFind('hello world', false, false);
                 return [
                     document.querySelector('#document h1')?.textContent === 'Inserted',
+                    headingStyle.fontFamily.includes('monospace'),
+                    headingStyle.color === 'rgb(122, 162, 247)',
                     selectionPreserved,
                     foundAcrossInlineNodes,
                     document.querySelectorAll('mark[data-mdvr-search="0"]').length === 2,

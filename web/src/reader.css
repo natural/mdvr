@@ -73,6 +73,11 @@ body {
   max-width: 80ch;
 }
 
+.reader :where(h1, h2, h3, h4, h5, h6) {
+  color: var(--reader-accent);
+  font-family: var(--reader-ui-font), system-ui, sans-serif;
+}
+
 .reader :where(pre, table) {
   max-width: 100%;
   overflow-x: auto;
@@ -90,6 +95,7 @@ body {
   margin: 0 0.25rem -2rem 0;
   position: relative;
   z-index: 1;
+  min-width: 2rem;
   font: inherit;
 }
 

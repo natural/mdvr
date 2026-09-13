@@ -48,10 +48,10 @@
       (() => {
         window.mdvrSetFonts = (uiFamily, codeFamily, uiSize, codeSize) => {
           const root = document.documentElement;
-          if (uiFamily) root.style.setProperty("--reader-ui-font", uiFamily);
-          if (codeFamily) root.style.setProperty("--reader-code-font", codeFamily);
-          if (Number.isFinite(uiSize)) root.style.setProperty("--reader-ui-size", `${uiSize}px`);
-          if (Number.isFinite(codeSize)) root.style.setProperty("--reader-code-size", `${codeSize}px`);
+          root.style.setProperty("--reader-ui-font", uiFamily || "system-ui");
+          root.style.setProperty("--reader-code-font", codeFamily || "ui-monospace");
+          root.style.setProperty("--reader-ui-size", Number.isFinite(uiSize) ? `${uiSize}px` : "16px");
+          root.style.setProperty("--reader-code-size", Number.isFinite(codeSize) ? `${codeSize}px` : "0.9em");
         };
         let nextRequestId = 1;
         const validBridgeAction = (action) => {

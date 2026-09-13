@@ -853,10 +853,16 @@ mod tests {
     }
 
     #[test]
-    fn tokyo_night_has_light_and_dark_members() {
+    fn tokyo_night_has_light_and_dark_heading_accents() {
         let family = default_family();
-        assert!(family.member("Tokyo Night — Light").is_some());
-        assert!(family.member("Tokyo Night — Dark").is_some());
+        assert_eq!(
+            family.member("Tokyo Night — Light").unwrap().tokens.accent,
+            "#2e7de9"
+        );
+        assert_eq!(
+            family.member("Tokyo Night — Dark").unwrap().tokens.accent,
+            "#7aa2f7"
+        );
     }
 
     #[test]
