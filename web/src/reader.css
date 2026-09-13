@@ -36,6 +36,7 @@
   --syntax-type-weight: normal;
   --syntax-operator-weight: normal;
   --syntax-punctuation-weight: normal;
+  scrollbar-width: none;
   --syntax-keyword-style: normal;
   --syntax-string-style: normal;
   --syntax-comment-style: normal;
@@ -48,6 +49,10 @@
     calc(var(--reader-ui-size) * var(--reader-scale)) / 1.6
     var(--reader-ui-font),
     sans-serif;
+}
+
+:root::-webkit-scrollbar {
+  display: none;
 }
 
 html,

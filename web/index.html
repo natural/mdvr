@@ -6,14 +6,11 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; img-src 'self' blob:; media-src 'none'; object-src 'none'; script-src 'self' 'nonce-mdvr-fixture'; style-src 'self' 'nonce-mdvr-fixture'; worker-src 'none'">
     <title>mdvr document</title>
     <style nonce="mdvr-fixture">
-      :root { color-scheme: light dark; font: 16px/1.6 system-ui, sans-serif; scrollbar-gutter: stable; scrollbar-color: transparent transparent; }
+      :root { color-scheme: light dark; font: 16px/1.6 system-ui, sans-serif; scrollbar-width: none; }
       body { margin: 0; background: Canvas; color: CanvasText; }
       #search { position: fixed; z-index: 2; top: .2rem; right: .75rem; display: flex; gap: .35rem; padding: .2rem .35rem; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius: .4rem; background: Canvas; box-shadow: 0 .2rem .8rem #0004; }
       #search[hidden] { display: none; }
-      :root::-webkit-scrollbar { width: 12px; }
-      :root::-webkit-scrollbar-thumb { background: transparent; border-radius: 6px; }
-      [data-scrollbar-visible="true"] { scrollbar-color: CanvasText transparent; }
-      [data-scrollbar-visible="true"]::-webkit-scrollbar-thumb { background: color-mix(in srgb, CanvasText 50%, transparent); }
+      :root::-webkit-scrollbar { display: none; }
       #search input[type="search"] { width: 16rem; font: inherit; }
       #search button { font: inherit; }
       #outline { position: fixed; z-index: 2; left: .75rem; top: 3.5rem; max-width: min(20rem, 45vw); max-height: calc(100vh - 4.25rem); overflow: auto; padding: .75rem; border-radius: .4rem; background: Canvas; box-shadow: 0 .2rem .8rem #0004; }
@@ -49,20 +46,6 @@
     <main id="document" class="reader" aria-live="polite" tabindex="0">Loading document…</main>
     <script nonce="mdvr-fixture">
       (() => {
-        let scrollbarMode = "show-on-scroll";
-        window.mdvrSetScrollbarVisibility = (mode) => {
-          scrollbarMode = mode;
-          document.documentElement.dataset.scrollbar = mode;
-          document.documentElement.dataset.scrollbarVisible = mode === "show" ? "true" : "false";
-        };
-        document.addEventListener("scroll", () => {
-          const top = document.scrollingElement?.scrollTop ?? 0;
-          const scrollingDown = top > 12 && top > (window.mdvrToolbarScrollTop ?? 0);
-          if (scrollbarMode === "show-on-scroll") {
-            document.documentElement.dataset.scrollbarVisible = scrollingDown ? "false" : "true";
-          }
-          window.mdvrToolbarScrollTop = top;
-        }, { passive: true });
         window.mdvrSetFonts = (uiFamily, codeFamily, uiSize, codeSize) => {
           const root = document.documentElement;
           if (uiFamily) root.style.setProperty("--reader-ui-font", uiFamily);

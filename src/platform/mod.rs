@@ -10,6 +10,7 @@ pub(crate) mod remote_policy;
 pub(crate) mod resource_policy;
 
 use std::{
+    ffi::c_void,
     fs,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
@@ -25,11 +26,11 @@ use crate::{
         MAX_FRAME_BYTES, Message, ResourceResult, decode, encode,
     },
     platform::bridge::{BridgeContext, BridgeMessage, BridgeRouter},
-    preferences::ScrollbarVisibility,
     theme::ZedFonts,
 };
+use block2::RcBlock;
 use cocoa::{
-    appkit::NSView,
+    appkit::{NSEventMask, NSEventModifierFlags, NSView},
     base::{BOOL, id, nil},
     foundation::NSString,
 };
@@ -107,6 +108,51 @@ fn canonical_bridge_message(bytes: &[u8]) -> Result<Vec<u8>, ContractError> {
     encode(&decode(bytes)?)
 }
 
+pub(crate) fn perform_undo() {
+    unsafe {
+        let _: BOOL = msg_send![cocoa::appkit::NSApp(), sendAction: sel!(undo:) to: nil from: nil];
+    }
+}
+
+pub(crate) fn perform_redo() {
+    unsafe {
+        let _: BOOL = msg_send![cocoa::appkit::NSApp(), sendAction: sel!(redo:) to: nil from: nil];
+    }
+}
+
+pub(crate) fn install_close_shortcut() {
+    const KEY_CODE_W: u16 = 13;
+    unsafe {
+        let handler: RcBlock<dyn Fn(*mut c_void) -> *mut c_void> =
+            RcBlock::new(|event: *mut c_void| {
+                let event = event as id;
+                let flags: NSEventModifierFlags = msg_send![event, modifierFlags];
+                let blocked = NSEventModifierFlags::NSShiftKeyMask
+                    | NSEventModifierFlags::NSControlKeyMask
+                    | NSEventModifierFlags::NSAlternateKeyMask;
+                let key_code: u16 = msg_send![event, keyCode];
+                if flags.contains(NSEventModifierFlags::NSCommandKeyMask)
+                    && !flags.intersects(blocked)
+                    && key_code == KEY_CODE_W
+                {
+                    let window: id = msg_send![cocoa::appkit::NSApp(), keyWindow];
+                    if window != nil {
+                        let _: () = msg_send![window, performClose: nil];
+                    }
+                    nil
+                } else {
+                    event
+                }
+                .cast()
+            });
+        let _: id = msg_send![
+            class!(NSEvent),
+            addLocalMonitorForEventsMatchingMask: NSEventMask::NSKeyDownMask.bits()
+            handler: &*handler
+        ];
+    }
+}
+
 pub(crate) fn set_window_background_draggable(window: &Window, draggable: bool) {
     let Ok(handle) = HasWindowHandle::window_handle(window) else {
         return;
@@ -119,6 +165,28 @@ pub(crate) fn set_window_background_draggable(window: &Window, draggable: bool) 
         let native_window: id = msg_send![view, window];
         if native_window != nil {
             let _: () = msg_send![native_window, setMovableByWindowBackground: draggable];
+        }
+    }
+}
+
+pub(crate) fn set_titlebar_controls_visible(window: &Window, visible: bool) {
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return;
+    };
+    unsafe {
+        let view = handle.ns_view.as_ptr() as id;
+        let native_window: id = msg_send![view, window];
+        if native_window == nil {
+            return;
+        }
+        for kind in [0_u64, 1, 2] {
+            let button: id = msg_send![native_window, standardWindowButton: kind];
+            if button != nil {
+                let _: () = msg_send![button, setHidden: !visible];
+            }
         }
     }
 }
@@ -358,7 +426,6 @@ struct PendingPage {
     theme_choices: Option<String>,
     locator: Option<PendingLocator>,
     fonts: Option<String>,
-    scrollbar: Option<String>,
 }
 
 #[derive(Default)]
@@ -372,7 +439,6 @@ struct PendingPageState {
     theme_choices: Option<String>,
     locator: Option<PendingLocator>,
     fonts: Option<String>,
-    scrollbar: Option<String>,
 }
 
 impl PendingPageState {
@@ -386,7 +452,6 @@ impl PendingPageState {
         self.theme_choices = None;
         self.locator = None;
         self.fonts = None;
-        self.scrollbar = None;
     }
 
     fn page_ready(&self) -> bool {
@@ -490,7 +555,6 @@ impl PendingPageState {
             theme_choices: self.theme_choices.take(),
             locator: self.locator.take(),
             fonts: self.fonts.take(),
-            scrollbar: self.scrollbar.take(),
         }
     }
 
@@ -507,9 +571,6 @@ impl PendingPageState {
             evaluate_javascript(web_view, &script);
         }
         if let Some(script) = pending.fonts {
-            evaluate_javascript(web_view, &script);
-        }
-        if let Some(script) = pending.scrollbar {
             evaluate_javascript(web_view, &script);
         }
         if let Some(appearance) = pending.appearance {
@@ -864,22 +925,6 @@ impl EmbeddedWebView {
             evaluate_javascript(&self.view, &script);
         } else {
             self.pending_state.theme_choices = Some(script);
-        }
-    }
-
-    pub fn set_scrollbar_visibility(&mut self, visibility: ScrollbarVisibility) {
-        assert!(main_thread(), "Wry WebView must be used on main thread");
-        let script = match visibility {
-            ScrollbarVisibility::Hide => "window.mdvrSetScrollbarVisibility('hide');",
-            ScrollbarVisibility::Show => "window.mdvrSetScrollbarVisibility('show');",
-            ScrollbarVisibility::ShowOnScroll => {
-                "window.mdvrSetScrollbarVisibility('show-on-scroll');"
-            }
-        };
-        if self.pending_state.page_ready() {
-            evaluate_javascript(&self.view, script);
-        } else {
-            self.pending_state.scrollbar = Some(script.to_owned());
         }
     }
 

@@ -64,10 +64,10 @@ test("narrow layout hides outline without reserving renderer toolbar space", () 
   expect(readerCss).toContain("padding: 2rem 1rem 1rem");
 });
 
-test("scrollbar visibility supports hide, show, and scroll modes", () => {
-  expect(html).toContain("window.mdvrSetScrollbarVisibility");
-  expect(html).toContain("dataset.scrollbar = mode");
-  expect(html).toContain('"show-on-scroll"');
+test("scrollbars stay hidden", () => {
+  expect(html).not.toContain("window.mdvrSetScrollbarVisibility");
+  expect(html).toContain(":root::-webkit-scrollbar { display: none; }");
+  expect(readerCss).toContain("scrollbar-width: none");
 });
 
 test("renderer contains no titlebar toolbar", () => {

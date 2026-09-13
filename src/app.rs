@@ -8,13 +8,13 @@ use std::{
         atomic::AtomicBool,
         mpsc::{Receiver, Sender, channel},
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Menu, MenuItem, MouseButton,
-    PathPromptOptions, Render, Subscription, SystemMenuType, Task, Timer, Window, WindowAppearance,
-    WindowBounds, WindowOptions, actions, div, point, prelude::*, px, size,
+    OsAction, PathPromptOptions, Render, Rgba, Subscription, SystemMenuType, Task, Timer, Window,
+    WindowAppearance, WindowBounds, WindowOptions, actions, div, point, prelude::*, px, size,
 };
 
 actions!(
@@ -24,8 +24,13 @@ actions!(
         OpenFolderAction,
         ShowPreferences,
         ShowPicker,
-        CycleToolbarVisibility,
         CloseWindow,
+        Cut,
+        Copy,
+        Paste,
+        SelectAll,
+        Undo,
+        Redo,
         QuitApp,
         AboutMdvr
     ]
@@ -47,15 +52,15 @@ use crate::{
         EmbeddedWebView, begin_window_drag,
         bridge::{BridgeContext, BridgeMessage},
         confirm_large_document, confirm_outside_resource, confirm_remote_images, file_url_path,
-        open_external_url, open_local_file,
+        install_close_shortcut, open_external_url, open_local_file, perform_redo, perform_undo,
         remote_fetch::fetch_image,
         remote_policy::{RemoteLimits, RemotePolicy},
         resource_policy::{ResourceAuthorization, ResourceDenied, ResourcePolicy},
-        set_window_appearance, set_window_background_draggable,
+        set_titlebar_controls_visible, set_window_appearance, set_window_background_draggable,
     },
     preferences::{
-        DisplayBounds, LaunchIntent, Preferences, ReadingLocator, ScrollbarVisibility,
-        ToolbarIcons, WindowGeometry, conventional_path, load_or_default, resolve_launch, save,
+        DisplayBounds, LaunchIntent, Preferences, ReadingLocator, WindowGeometry,
+        conventional_path, load_or_default, resolve_launch, save,
     },
     theme::{
         AppearanceMode, Theme, ThemeFamily, ZedFonts, default_family, default_theme, import_file,
@@ -330,6 +335,107 @@ impl SharedPreferences {
 
 impl gpui::Global for SharedPreferences {}
 
+#[derive(Clone, Copy)]
+struct UiPalette {
+    dark: bool,
+    background: Rgba,
+    foreground: Rgba,
+    control: Rgba,
+    accent: Rgba,
+    selection: Rgba,
+}
+
+fn theme_color(value: &str, fallback: u32) -> Rgba {
+    value
+        .strip_prefix('#')
+        .and_then(|value| value.get(..6))
+        .and_then(|value| u32::from_str_radix(value, 16).ok())
+        .map_or_else(|| gpui::rgb(fallback), gpui::rgb)
+}
+
+fn ui_palette(preferences: &Preferences, shared: &SharedPreferences, window: &Window) -> UiPalette {
+    let selected = if preferences.theme.is_none() {
+        shared.zed_theme.as_ref()
+    } else {
+        preferences
+            .theme
+            .as_deref()
+            .and_then(|name| shared.theme_family.member(name))
+    };
+    let mode = selected.map_or_else(
+        || match preferences.theme.as_deref() {
+            Some("light") => AppearanceMode::Light,
+            Some("dark") => AppearanceMode::Dark,
+            _ => match window.appearance() {
+                WindowAppearance::Dark | WindowAppearance::VibrantDark => AppearanceMode::Dark,
+                WindowAppearance::Light | WindowAppearance::VibrantLight => AppearanceMode::Light,
+            },
+        },
+        |theme| theme.tokens.mode,
+    );
+    let tokens = selected
+        .map(|theme| theme.tokens.clone())
+        .unwrap_or_else(|| default_theme(mode).tokens);
+    let background = theme_color(&tokens.reader_background, 0x202124);
+    let accent = theme_color(&tokens.accent, 0x7aa2f7);
+    UiPalette {
+        dark: mode == AppearanceMode::Dark,
+        background,
+        foreground: theme_color(&tokens.reader_foreground, 0xf1f3f4),
+        control: theme_color(&tokens.code_background, 0x3c4043),
+        accent,
+        selection: Rgba {
+            r: background.r * 0.82 + accent.r * 0.18,
+            g: background.g * 0.82 + accent.g * 0.18,
+            b: background.b * 0.82 + accent.b * 0.18,
+            a: 1.0,
+        },
+    }
+}
+
+fn relative_age(value: u64, unit: &str) -> String {
+    format!("{value} {unit}{} ago", if value == 1 { "" } else { "s" })
+}
+
+fn relative_mtime(root: &std::path::Path, relative: &str) -> String {
+    let elapsed = root
+        .join(relative)
+        .metadata()
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| SystemTime::now().duration_since(modified).ok());
+    let Some(elapsed) = elapsed else {
+        return "modified time unavailable".into();
+    };
+    let seconds = elapsed.as_secs();
+    match seconds {
+        0..=59 => "just now".into(),
+        60..=3_599 => relative_age(seconds / 60, "minute"),
+        3_600..=86_399 => relative_age(seconds / 3_600, "hour"),
+        86_400..=2_591_999 => relative_age(seconds / 86_400, "day"),
+        2_592_000..=31_535_999 => relative_age(seconds / 2_592_000, "month"),
+        _ => relative_age(seconds / 31_536_000, "year"),
+    }
+}
+
+struct TextTooltip {
+    text: &'static str,
+    palette: UiPalette,
+}
+
+impl Render for TextTooltip {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_2()
+            .py_1()
+            .rounded_sm()
+            .bg(self.palette.control)
+            .text_color(self.palette.foreground)
+            .text_sm()
+            .child(self.text)
+    }
+}
+
 fn publish_preferences(cx: &mut App, preferences: &Preferences) {
     let shared = SharedPreferences::new(preferences.clone());
     cx.update_global::<SharedPreferences, _>(|state, _| *state = shared);
@@ -367,7 +473,7 @@ struct MdvrView {
     loading_document: bool,
     initial_load_task: Option<Task<()>>,
     navigation_load_task: Option<Task<()>>,
-    toolbar_visibility: ScrollbarVisibility,
+    activation_subscription: Option<Subscription>,
     render_started: Option<Instant>,
     initialized: bool,
     remote_consent: Option<(crate::contracts::DocumentId, bool)>,
@@ -377,15 +483,6 @@ struct MdvrView {
 }
 
 impl MdvrView {
-    fn cycle_toolbar_visibility(&mut self, cx: &mut Context<Self>) {
-        self.toolbar_visibility = match self.toolbar_visibility {
-            ScrollbarVisibility::ShowOnScroll => ScrollbarVisibility::Show,
-            ScrollbarVisibility::Show => ScrollbarVisibility::Hide,
-            ScrollbarVisibility::Hide => ScrollbarVisibility::ShowOnScroll,
-        };
-        cx.notify();
-    }
-
     fn new(shell: ShellState, navigation: NavigationState, cx: &mut Context<Self>) -> Self {
         let (remote_sender, remote_results) = channel();
         let picker_focus = cx.focus_handle();
@@ -426,7 +523,7 @@ impl MdvrView {
             loading_document: false,
             initial_load_task: None,
             navigation_load_task: None,
-            toolbar_visibility: ScrollbarVisibility::ShowOnScroll,
+            activation_subscription: None,
             render_started: None,
             initialized: false,
             remote_consent: None,
@@ -446,6 +543,9 @@ impl MdvrView {
     }
 
     fn initialize(&mut self, window: &mut Window, launch: &LaunchPlan, cx: &mut Context<Self>) {
+        self.activation_subscription = Some(cx.observe_window_activation(window, |_, _, cx| {
+            cx.notify();
+        }));
         self.bridge_task = Some(cx.spawn_in(window, async move |view, cx| {
             loop {
                 Timer::after(Duration::from_millis(16)).await;
@@ -583,7 +683,7 @@ impl MdvrView {
                     self.restore_current_document(window, cx)
                 }
                 "r" if self.failed_path.is_some() => self.retry_failed_path(window, cx),
-                _ => {}
+                _ => cx.propagate(),
             }
             return;
         }
@@ -912,7 +1012,6 @@ impl MdvrView {
             if let Some(fonts) = self.zed_fonts.as_ref() {
                 web_view.set_fonts(fonts);
             }
-            web_view.set_scrollbar_visibility(self.preferences.scrollbar_visibility);
         }
         let tokens = selected_theme
             .map(|theme| theme.tokens.clone())
@@ -1584,37 +1683,38 @@ impl MdvrView {
         }
     }
 
-    fn toolbar_text(&self, icon: &str, label: &str) -> String {
-        match self.preferences.toolbar_icons {
-            ToolbarIcons::Icon => icon.into(),
-            ToolbarIcons::IconAndText => format!("{icon}  {label}"),
-            ToolbarIcons::TextOnly => label.into(),
+    fn titlebar(
+        &self,
+        active: bool,
+        palette: UiPalette,
+        title: &str,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        if !active {
+            return div().h(px(0.0)).into_any_element();
         }
-    }
-
-    fn titlebar(&self, dark: bool, title: &str, cx: &mut Context<Self>) -> gpui::AnyElement {
-        let background = if dark {
-            gpui::rgb(0x29292b)
-        } else {
-            gpui::rgb(0xe9e9e9)
-        };
-        let foreground = if dark {
-            gpui::rgb(0xf2f2f2)
-        } else {
-            gpui::rgb(0x202020)
-        };
-        let button_hover = if dark {
-            gpui::rgb(0x444446)
-        } else {
-            gpui::rgb(0xd3d3d3)
-        };
         let drag = |id| {
             div()
                 .id(id)
                 .h_full()
-                .on_mouse_down(MouseButton::Left, |_, window, _| {
-                    begin_window_drag(window);
+                .on_mouse_down(MouseButton::Left, |_, window, _| begin_window_drag(window))
+        };
+        let button = |id, icon: &'static str, tooltip: &'static str| {
+            div()
+                .id(id)
+                .px_2()
+                .py_1()
+                .rounded_sm()
+                .cursor_pointer()
+                .hover(move |style| style.bg(palette.control))
+                .tooltip(move |_, cx| {
+                    cx.new(|_| TextTooltip {
+                        text: tooltip,
+                        palette,
+                    })
+                    .into()
                 })
+                .child(icon)
         };
         let mut bar = div()
             .h(px(MAIN_TITLEBAR_HEIGHT as f32))
@@ -1622,97 +1722,53 @@ impl MdvrView {
             .flex()
             .items_center()
             .gap_1()
-            .bg(background)
-            .text_color(foreground)
+            .bg(palette.background)
+            .text_color(palette.foreground)
             .border_b_1()
-            .border_color(if dark {
-                gpui::rgb(0x1d1d1f)
-            } else {
-                gpui::rgb(0xc9c9c9)
-            })
+            .border_color(palette.control)
             .child(drag("titlebar-drag-left").w(px(72.0)));
 
-        if self.web_view.is_some() && self.toolbar_visibility != ScrollbarVisibility::Hide {
+        if self.web_view.is_some() {
             bar = bar
                 .child(
-                    div()
-                        .id("titlebar-back")
-                        .px_2()
-                        .py_1()
-                        .rounded_sm()
-                        .cursor_pointer()
+                    button("titlebar-back", "‹", "Back")
                         .when(!self.navigation.can_go_back(), |button| {
                             button.opacity(0.35)
                         })
-                        .hover(move |style| style.bg(button_hover))
-                        .child("‹")
                         .on_click(cx.listener(|view, _, _, cx| view.go_back(cx))),
                 )
                 .child(
-                    div()
-                        .id("titlebar-forward")
-                        .px_2()
-                        .py_1()
-                        .rounded_sm()
-                        .cursor_pointer()
+                    button("titlebar-forward", "›", "Forward")
                         .when(!self.navigation.can_go_forward(), |button| {
                             button.opacity(0.35)
                         })
-                        .hover(move |style| style.bg(button_hover))
-                        .child("›")
                         .on_click(cx.listener(|view, _, _, cx| view.go_forward(cx))),
                 )
                 .child(
-                    div()
-                        .id("titlebar-open-file")
-                        .px_2()
-                        .py_1()
-                        .rounded_sm()
-                        .cursor_pointer()
-                        .hover(move |style| style.bg(button_hover))
-                        .child(self.toolbar_text("▱", "Open File"))
+                    button("titlebar-open-file", "▱", "Open File")
                         .on_click(|_, _, cx| cx.defer(prompt_for_document)),
                 )
                 .child(
-                    div()
-                        .id("titlebar-open-folder")
-                        .px_2()
-                        .py_1()
-                        .rounded_sm()
-                        .cursor_pointer()
-                        .hover(move |style| style.bg(button_hover))
-                        .child(self.toolbar_text("▰", "Open Folder"))
+                    button("titlebar-open-folder", "▰", "Open Folder")
                         .on_click(|_, _, cx| cx.defer(prompt_for_directory)),
                 )
                 .child(
-                    div()
-                        .id("titlebar-copy-markdown")
-                        .px_2()
-                        .py_1()
-                        .rounded_sm()
-                        .cursor_pointer()
-                        .hover(move |style| style.bg(button_hover))
-                        .child(self.toolbar_text("⧉", "Copy Markdown"))
-                        .on_click(cx.listener(|view, _, _, _| {
+                    button("titlebar-copy-markdown", "⧉", "Copy Markdown").on_click(cx.listener(
+                        |view, _, _, _| {
                             if let Some(web_view) = view.web_view.as_ref() {
                                 web_view.copy_source();
                             }
-                        })),
+                        },
+                    )),
                 )
                 .child(
-                    div()
-                        .id("titlebar-copy-rendered")
-                        .px_2()
-                        .py_1()
-                        .rounded_sm()
-                        .cursor_pointer()
-                        .hover(move |style| style.bg(button_hover))
-                        .child(self.toolbar_text("◈", "Copy Rendered"))
-                        .on_click(cx.listener(|view, _, _, _| {
+                    button("titlebar-copy-rendered", "◈", "Copy Rendered").on_click(cx.listener(
+                        |view, _, _, _| {
                             if let Some(web_view) = view.web_view.as_ref() {
                                 web_view.copy_rendered();
                             }
-                        })),
+                        },
+                    )),
                 );
         }
 
@@ -1722,7 +1778,8 @@ impl MdvrView {
                 .min_w(px(32.0))
                 .flex()
                 .items_center()
-                .justify_center()
+                .justify_end()
+                .pr_3()
                 .text_sm()
                 .child(title.to_owned()),
         )
@@ -1754,51 +1811,25 @@ impl Render for MdvrView {
             .unwrap_or("mdvr")
             .to_owned();
         window.set_window_title(&title);
-        set_window_background_draggable(window, self.web_view.is_some());
+        let active = window.is_window_active();
+        set_window_background_draggable(window, active && self.web_view.is_some());
+        set_titlebar_controls_visible(window, active);
         self.process_next_open(window, cx);
         if self.initialized {
             self.update_appearance(window);
             self.capture_window_geometry(window);
         }
-        let picker_dark = match self.preferences.theme.as_deref() {
-            Some("light") => false,
-            Some("dark") => true,
-            Some(name) => self
-                .theme_family
-                .as_ref()
-                .and_then(|family| family.member(name))
-                .is_none_or(|theme| theme.tokens.mode == AppearanceMode::Dark),
-            None => self.zed_theme.as_ref().map_or_else(
-                || {
-                    matches!(
-                        window.appearance(),
-                        WindowAppearance::Dark | WindowAppearance::VibrantDark
-                    )
-                },
-                |theme| theme.tokens.mode == AppearanceMode::Dark,
-            ),
-        };
-        let picker_bg = if picker_dark {
-            gpui::rgb(0x202124)
-        } else {
-            gpui::rgb(0xffffff)
-        };
-        let picker_fg = if picker_dark {
-            gpui::rgb(0xf1f3f4)
-        } else {
-            gpui::rgb(0x202124)
-        };
-        let picker_muted = if picker_dark {
-            gpui::rgb(0xb0b3b8)
-        } else {
-            gpui::rgb(0x5f6368)
-        };
-        let titlebar = self.titlebar(picker_dark, &title, cx);
+        let shared = cx.global::<SharedPreferences>().clone();
+        let palette = ui_palette(&self.preferences, &shared, window);
+        let titlebar = self.titlebar(active, palette, &title, cx);
         if self.loading_document {
-            return main_window_frame(titlebar, div().size_full().bg(picker_bg).into_any_element());
+            return main_window_frame(
+                titlebar,
+                div().size_full().bg(palette.background).into_any_element(),
+            );
         }
         if let Some(web_view) = self.web_view.as_ref() {
-            web_view.sync_frame(MAIN_TITLEBAR_HEIGHT);
+            web_view.sync_frame(if active { MAIN_TITLEBAR_HEIGHT } else { 0.0 });
             return main_window_frame(titlebar, div().size_full().into_any_element());
         }
         if let Some((path, bytes)) = self.pending_large.as_ref() {
@@ -1809,8 +1840,8 @@ impl Render for MdvrView {
                 .justify_center()
                 .items_center()
                 .gap_3()
-                .bg(picker_bg)
-                .text_color(picker_fg)
+                .bg(palette.background)
+                .text_color(palette.foreground)
                 .child(format!(
                     "{} is {:.1} MiB",
                     path.display(),
@@ -1823,7 +1854,7 @@ impl Render for MdvrView {
                         .py_2()
                         .rounded_sm()
                         .cursor_pointer()
-                        .bg(gpui::rgb(0x3c4043))
+                        .bg(palette.control)
                         .child("Open full file")
                         .on_click(cx.listener(|view, _, window, cx| {
                             view.confirm_large_file(window, cx);
@@ -1835,6 +1866,8 @@ impl Render for MdvrView {
         window.focus(&self.picker_focus);
         let selected = self.shell.picker.selected().map(str::to_owned);
         let entries = self.shell.picker.visible();
+        let document_count = entries.len();
+        let root = self.shell.root.clone().unwrap_or_default();
         let can_retry = self.failed_path.is_some();
         let content = div()
             .id("picker")
@@ -1847,12 +1880,33 @@ impl Render for MdvrView {
             .flex_col()
             .p_4()
             .gap_2()
-            .bg(picker_bg)
-            .text_color(picker_fg)
+            .bg(palette.background)
+            .text_color(palette.foreground)
             .child(
                 div()
-                    .text_color(picker_muted)
-                    .child(format!("Filter: {}", self.shell.picker.query())),
+                    .id("picker-filter")
+                    .w_full()
+                    .px_3()
+                    .py_2()
+                    .rounded_sm()
+                    .border_1()
+                    .border_color(palette.accent)
+                    .bg(palette.control)
+                    .child(if self.shell.picker.query().is_empty() {
+                        "Filter files…".to_owned()
+                    } else {
+                        self.shell.picker.query().to_owned()
+                    }),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(palette.foreground)
+                    .opacity(0.65)
+                    .child(format!(
+                        "{document_count} document{}",
+                        if document_count == 1 { "" } else { "s" }
+                    )),
             )
             .when_some(self.startup_error.clone(), |view, error| {
                 view.child(div().text_color(gpui::rgb(0xff8a80)).child(error))
@@ -1870,7 +1924,7 @@ impl Render for MdvrView {
                                     .py_2()
                                     .rounded_sm()
                                     .cursor_pointer()
-                                    .bg(gpui::rgb(0x3c4043))
+                                    .bg(palette.control)
                                     .child("Retry")
                                     .on_click(cx.listener(|view, _, window, cx| {
                                         view.retry_failed_path(window, cx);
@@ -1884,7 +1938,7 @@ impl Render for MdvrView {
                                 .py_2()
                                 .rounded_sm()
                                 .cursor_pointer()
-                                .bg(gpui::rgb(0x3c4043))
+                                .bg(palette.control)
                                 .child("Choose file")
                                 .on_click(cx.listener(|view, _, _, cx| {
                                     view.prompt_for_picker_document(cx);
@@ -1897,7 +1951,7 @@ impl Render for MdvrView {
                                 .py_2()
                                 .rounded_sm()
                                 .cursor_pointer()
-                                .bg(gpui::rgb(0x3c4043))
+                                .bg(palette.control)
                                 .child("Browse folder")
                                 .on_click(cx.listener(|view, _, _, cx| {
                                     view.prompt_for_picker_directory(cx);
@@ -1913,16 +1967,29 @@ impl Render for MdvrView {
                     .children(entries.into_iter().enumerate().map(|(index, entry)| {
                         let path = entry.relative_path;
                         let is_selected = selected.as_deref() == Some(path.as_str());
+                        let modified = relative_mtime(&root, &path);
                         div()
                             .id(("picker-entry", index))
                             .px_3()
                             .py_2()
+                            .border_l_2()
+                            .border_color(if is_selected {
+                                palette.accent
+                            } else {
+                                palette.background
+                            })
                             .rounded_sm()
                             .cursor_pointer()
-                            .hover(|style| style.bg(gpui::rgb(0x303134)))
-                            .when(is_selected, |style| style.bg(gpui::rgb(0x3c4043)))
-                            .text_color(picker_fg)
-                            .child(path.clone())
+                            .hover(move |style| style.bg(palette.control))
+                            .when(is_selected, |style| style.bg(palette.selection))
+                            .text_color(palette.foreground)
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .child(path.clone())
+                                    .child(div().text_sm().opacity(0.65).child(modified)),
+                            )
                             .on_click(cx.listener(move |view, _, window, cx| {
                                 view.open_picker_document(path.clone(), window, cx);
                             }))
@@ -1944,7 +2011,7 @@ impl Render for MdvrView {
                                     .py_2()
                                     .rounded_sm()
                                     .cursor_pointer()
-                                    .bg(gpui::rgb(0x3c4043))
+                                    .bg(palette.control)
                                     .child("Choose folder")
                                     .on_click(cx.listener(|view, _, _, cx| {
                                         view.prompt_for_picker_directory(cx);
@@ -1998,122 +2065,63 @@ impl PreferencesView {
 
 impl Render for PreferencesView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        window.set_window_title("Preferences");
         let theme = self.preferences.theme.as_deref().unwrap_or("system");
-        let shared = cx.global::<SharedPreferences>();
-        let selected = self
-            .preferences
-            .theme
-            .as_deref()
-            .and_then(|name| shared.theme_family.member(name))
-            .or(shared
-                .zed_theme
-                .as_ref()
-                .filter(|_| self.preferences.theme.is_none()));
-        let dark = selected.map_or_else(
-            || match self.preferences.theme.as_deref() {
-                Some("light") => false,
-                Some("dark") => true,
-                _ => matches!(
-                    window.appearance(),
-                    WindowAppearance::Dark | WindowAppearance::VibrantDark
-                ),
-            },
-            |theme| theme.tokens.mode == AppearanceMode::Dark,
-        );
+        let shared = cx.global::<SharedPreferences>().clone();
+        let palette = ui_palette(&self.preferences, &shared, window);
         set_window_appearance(
             window,
-            (self.preferences.theme.is_some() || selected.is_some()).then_some(dark),
+            (self.preferences.theme.is_some() || shared.zed_theme.is_some())
+                .then_some(palette.dark),
         );
-        let background = if dark {
-            gpui::rgb(0x202124)
-        } else {
-            gpui::rgb(0xffffff)
+        let button = |id, label| {
+            div()
+                .id(id)
+                .px_3()
+                .py_2()
+                .rounded_sm()
+                .cursor_pointer()
+                .bg(palette.control)
+                .hover(move |style| style.bg(palette.selection))
+                .child(label)
         };
-        let foreground = if dark {
-            gpui::rgb(0xf1f3f4)
-        } else {
-            gpui::rgb(0x202124)
-        };
-        div()
-            .size_full()
+        let titlebar = div()
+            .h(px(MAIN_TITLEBAR_HEIGHT as f32))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_end()
+            .pr_3()
+            .bg(palette.background)
+            .text_color(palette.foreground)
+            .border_b_1()
+            .border_color(palette.control)
+            .text_sm()
+            .on_mouse_down(MouseButton::Left, |_, window, _| begin_window_drag(window))
+            .child("Preferences");
+        let content = div()
+            .flex_1()
             .flex()
             .flex_col()
             .gap_3()
             .p_6()
-            .bg(background)
-            .text_color(foreground)
+            .bg(palette.background)
+            .text_color(palette.foreground)
             .child(div().text_xl().child("Preferences"))
             .child(div().child(format!("Theme: {theme}")))
-            .child(div().child(format!(
-                "Toolbar Icons: {}",
-                match self.preferences.toolbar_icons {
-                    ToolbarIcons::Icon => "Icon",
-                    ToolbarIcons::IconAndText => "Icon + Text",
-                    ToolbarIcons::TextOnly => "Text Only",
-                }
-            )))
-            .child(div().child(format!(
-                "Scrollbar: {}",
-                match self.preferences.scrollbar_visibility {
-                    ScrollbarVisibility::Hide => "Hidden",
-                    ScrollbarVisibility::Show => "Always shown",
-                    ScrollbarVisibility::ShowOnScroll => "Show on scroll",
-                }
-            )))
             .child(
-                div()
-                    .id("preferences-toolbar")
-                    .px_3()
-                    .py_2()
-                    .rounded_sm()
-                    .cursor_pointer()
-                    .bg(gpui::rgb(0x3c4043))
-                    .child("Cycle toolbar icons")
-                    .on_click(cx.listener(|view, _, _, cx| {
-                        view.preferences.toolbar_icons = match view.preferences.toolbar_icons {
-                            ToolbarIcons::Icon => ToolbarIcons::IconAndText,
-                            ToolbarIcons::IconAndText => ToolbarIcons::TextOnly,
-                            ToolbarIcons::TextOnly => ToolbarIcons::Icon,
-                        };
-                        view.save(cx);
-                    })),
-            )
-            .child(
-                div()
-                    .id("preferences-scrollbar")
-                    .px_3()
-                    .py_2()
-                    .rounded_sm()
-                    .cursor_pointer()
-                    .bg(gpui::rgb(0x3c4043))
-                    .child("Cycle scrollbar visibility")
-                    .on_click(cx.listener(|view, _, _, cx| {
-                        view.preferences.scrollbar_visibility =
-                            match view.preferences.scrollbar_visibility {
-                                ScrollbarVisibility::ShowOnScroll => ScrollbarVisibility::Show,
-                                ScrollbarVisibility::Show => ScrollbarVisibility::Hide,
-                                ScrollbarVisibility::Hide => ScrollbarVisibility::ShowOnScroll,
-                            };
-                        view.save(cx);
-                    })),
-            )
-            .child(
-                div()
-                    .id("preferences-zed-config")
-                    .px_3()
-                    .py_2()
-                    .rounded_sm()
-                    .cursor_pointer()
-                    .bg(gpui::rgb(0x3c4043))
-                    .child(format!(
+                button(
+                    "preferences-zed-config",
+                    format!(
                         "Use Zed theme/fonts: {}",
                         if self.preferences.use_zed_config {
                             "On"
                         } else {
                             "Off"
                         }
-                    ))
-                    .on_click(cx.listener(|view, _, _, cx| view.toggle_zed_config(cx))),
+                    ),
+                )
+                .on_click(cx.listener(|view, _, _, cx| view.toggle_zed_config(cx))),
             )
             .child(
                 div()
@@ -2125,44 +2133,32 @@ impl Render for PreferencesView {
                         self.preferences.text_scale_percent
                     ))
                     .child(
-                        div()
-                            .id("preferences-scale-down")
-                            .px_2()
-                            .py_1()
-                            .rounded_sm()
-                            .cursor_pointer()
-                            .bg(gpui::rgb(0x3c4043))
-                            .child("−")
+                        button("preferences-scale-down", "−".into())
                             .on_click(cx.listener(|view, _, _, cx| view.adjust_scale(-10, cx))),
                     )
                     .child(
-                        div()
-                            .id("preferences-scale-up")
-                            .px_2()
-                            .py_1()
-                            .rounded_sm()
-                            .cursor_pointer()
-                            .bg(gpui::rgb(0x3c4043))
-                            .child("+")
+                        button("preferences-scale-up", "+".into())
                             .on_click(cx.listener(|view, _, _, cx| view.adjust_scale(10, cx))),
                     ),
             )
             .child(
-                div()
-                    .id("preferences-theme")
-                    .px_3()
-                    .py_2()
-                    .rounded_sm()
-                    .cursor_pointer()
-                    .bg(gpui::rgb(0x3c4043))
-                    .child("Cycle theme")
+                button("preferences-theme", "Cycle theme".into())
                     .on_click(cx.listener(|view, _, _, cx| view.cycle_theme(cx))),
             )
             .child(
-                self.status
-                    .clone()
-                    .unwrap_or_else(|| "Changes save automatically".into()),
-            )
+                div().opacity(0.65).child(
+                    self.status
+                        .clone()
+                        .unwrap_or_else(|| "Changes save automatically".into()),
+                ),
+            );
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(palette.background)
+            .child(titlebar)
+            .child(content)
     }
 }
 
@@ -2264,12 +2260,6 @@ fn close_window_action(_: &CloseWindow, cx: &mut App) {
     }
 }
 
-fn cycle_toolbar_visibility_action(_: &CycleToolbarVisibility, cx: &mut App) {
-    if let Some(window) = active_mdvr_window(cx) {
-        let _ = window.update(cx, |view, _, cx| view.cycle_toolbar_visibility(cx));
-    }
-}
-
 fn show_picker_action(_: &ShowPicker, cx: &mut App) {
     if let Some(window) = active_mdvr_window(cx) {
         let _ = window.update(cx, |view, _, cx| view.open_document_picker(cx));
@@ -2297,7 +2287,7 @@ fn show_preferences(_: &ShowPreferences, cx: &mut App) {
             })),
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("Preferences".into()),
-                appears_transparent: false,
+                appears_transparent: true,
                 traffic_light_position: None,
             }),
             is_resizable: true,
@@ -2318,6 +2308,16 @@ fn show_preferences(_: &ShowPreferences, cx: &mut App) {
             })
         },
     );
+}
+
+fn edit_menu_action<T>(_: &T, _: &mut App) {}
+
+fn undo_action(_: &Undo, _: &mut App) {
+    perform_undo();
+}
+
+fn redo_action(_: &Redo, _: &mut App) {
+    perform_redo();
 }
 
 fn quit_app(_: &QuitApp, cx: &mut App) {
@@ -2435,6 +2435,7 @@ pub fn run(launch: LaunchPlan) {
         }
     });
     application.run(move |cx: &mut App| {
+        install_close_shortcut();
         let preferences = conventional_path()
             .map(|path| load_or_default(&path).preferences)
             .unwrap_or_default();
@@ -2442,8 +2443,13 @@ pub fn run(launch: LaunchPlan) {
         cx.on_action(open_file_action);
         cx.on_action(open_folder_action);
         cx.on_action(show_picker_action);
-        cx.on_action(cycle_toolbar_visibility_action);
         cx.on_action(close_window_action);
+        cx.on_action(edit_menu_action::<Cut>);
+        cx.on_action(edit_menu_action::<Copy>);
+        cx.on_action(edit_menu_action::<Paste>);
+        cx.on_action(edit_menu_action::<SelectAll>);
+        cx.on_action(undo_action);
+        cx.on_action(redo_action);
         cx.on_action(show_preferences);
         cx.on_action(quit_app);
         cx.on_action(about_mdvr);
@@ -2451,8 +2457,13 @@ pub fn run(launch: LaunchPlan) {
             gpui::KeyBinding::new("cmd-o", OpenFileAction, None),
             gpui::KeyBinding::new("cmd-shift-o", OpenFolderAction, None),
             gpui::KeyBinding::new("cmd-p", ShowPicker, None),
-            gpui::KeyBinding::new("cmd-shift-b", CycleToolbarVisibility, None),
             gpui::KeyBinding::new("cmd-w", CloseWindow, None),
+            gpui::KeyBinding::new("cmd-x", Cut, None),
+            gpui::KeyBinding::new("cmd-c", Copy, None),
+            gpui::KeyBinding::new("cmd-v", Paste, None),
+            gpui::KeyBinding::new("cmd-a", SelectAll, None),
+            gpui::KeyBinding::new("cmd-z", Undo, None),
+            gpui::KeyBinding::new("cmd-shift-z", Redo, None),
             gpui::KeyBinding::new("cmd-,", ShowPreferences, None),
             gpui::KeyBinding::new("cmd-q", QuitApp, None),
         ]);
@@ -2474,8 +2485,19 @@ pub fn run(launch: LaunchPlan) {
                     MenuItem::action("Open Folder…", OpenFolderAction),
                     MenuItem::separator(),
                     MenuItem::action("Browse Files", ShowPicker),
-                    MenuItem::action("Cycle Toolbar Visibility", CycleToolbarVisibility),
                     MenuItem::action("Close Window", CloseWindow),
+                ],
+            },
+            Menu {
+                name: "Edit".into(),
+                items: vec![
+                    MenuItem::os_action("Undo", Undo, OsAction::Undo),
+                    MenuItem::os_action("Redo", Redo, OsAction::Redo),
+                    MenuItem::separator(),
+                    MenuItem::os_action("Cut", Cut, OsAction::Cut),
+                    MenuItem::os_action("Copy", Copy, OsAction::Copy),
+                    MenuItem::os_action("Paste", Paste, OsAction::Paste),
+                    MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
                 ],
             },
         ]);

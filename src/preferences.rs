@@ -25,24 +25,6 @@ pub const MAX_WINDOW_HEIGHT: u32 = 10_000;
 pub const MIN_SCREEN_COORDINATE: i32 = -100_000;
 pub const MAX_SCREEN_COORDINATE: i32 = 100_000;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ScrollbarVisibility {
-    Hide,
-    Show,
-    #[default]
-    ShowOnScroll,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ToolbarIcons {
-    #[default]
-    Icon,
-    IconAndText,
-    TextOnly,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PreferencesError {
     Io(String),
@@ -183,10 +165,15 @@ pub struct Preferences {
     pub theme_file: Option<PathBuf>,
     #[serde(default = "default_use_zed_config")]
     pub use_zed_config: bool,
-    #[serde(default, alias = "toolbar_visibility")]
-    pub scrollbar_visibility: ScrollbarVisibility,
-    #[serde(default)]
-    pub toolbar_icons: ToolbarIcons,
+    #[serde(
+        default,
+        rename = "scrollbar_visibility",
+        alias = "toolbar_visibility",
+        skip_serializing
+    )]
+    pub(crate) legacy_scrollbar_visibility: Option<serde_json::Value>,
+    #[serde(default, rename = "toolbar_icons", skip_serializing)]
+    pub(crate) legacy_toolbar_icons: Option<serde_json::Value>,
     #[serde(default = "default_text_scale")]
     pub text_scale_percent: u16,
     #[serde(default)]
@@ -211,8 +198,8 @@ impl Default for Preferences {
             theme: None,
             theme_file: None,
             use_zed_config: true,
-            scrollbar_visibility: ScrollbarVisibility::default(),
-            toolbar_icons: ToolbarIcons::default(),
+            legacy_scrollbar_visibility: None,
+            legacy_toolbar_icons: None,
             text_scale_percent: DEFAULT_TEXT_SCALE_PERCENT,
             window: WindowGeometry::default(),
         }
@@ -451,6 +438,17 @@ mod tests {
         assert!(save(&bad_path, &preferences).is_err());
         assert_eq!(load(&path).unwrap(), preferences);
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn retired_toolbar_and_scrollbar_preferences_load_but_do_not_save() {
+        let preferences: Preferences = serde_json::from_str(
+            r#"{"version":1,"toolbar_icons":"icon-and-text","scrollbar_visibility":"show"}"#,
+        )
+        .unwrap();
+        let saved = serde_json::to_string(&preferences).unwrap();
+        assert!(!saved.contains("toolbar_icons"));
+        assert!(!saved.contains("scrollbar_visibility"));
     }
 
     #[test]
