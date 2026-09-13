@@ -26,7 +26,7 @@ use crate::{
         MAX_FRAME_BYTES, Message, ResourceResult, decode, encode,
     },
     platform::bridge::{BridgeContext, BridgeMessage, BridgeRouter},
-    preferences::ScrollbarVisibility,
+    preferences::{ScrollbarVisibility, ToolbarIcons},
     theme::ZedFonts,
 };
 use cocoa::{
@@ -367,6 +367,7 @@ struct PendingPage {
     fonts: Option<String>,
     toolbar: Option<String>,
     scrollbar: Option<String>,
+    toolbar_icons: Option<String>,
 }
 
 #[derive(Default)]
@@ -383,6 +384,7 @@ struct PendingPageState {
     fonts: Option<String>,
     toolbar: Option<String>,
     scrollbar: Option<String>,
+    toolbar_icons: Option<String>,
 }
 
 impl PendingPageState {
@@ -399,6 +401,7 @@ impl PendingPageState {
         self.fonts = None;
         self.toolbar = None;
         self.scrollbar = None;
+        self.toolbar_icons = None;
     }
 
     fn page_ready(&self) -> bool {
@@ -505,6 +508,7 @@ impl PendingPageState {
             fonts: self.fonts.take(),
             toolbar: self.toolbar.take(),
             scrollbar: self.scrollbar.take(),
+            toolbar_icons: self.toolbar_icons.take(),
         }
     }
 
@@ -530,6 +534,9 @@ impl PendingPageState {
             evaluate_javascript(web_view, &script);
         }
         if let Some(script) = pending.scrollbar {
+            evaluate_javascript(web_view, &script);
+        }
+        if let Some(script) = pending.toolbar_icons {
             evaluate_javascript(web_view, &script);
         }
         if let Some(appearance) = pending.appearance {
@@ -891,6 +898,21 @@ impl EmbeddedWebView {
             evaluate_javascript(&self.view, script);
         } else {
             self.pending_state.scrollbar = Some(script.to_owned());
+        }
+    }
+
+    pub fn set_toolbar_icons(&mut self, icons: ToolbarIcons) {
+        assert!(main_thread(), "Wry WebView must be used on main thread");
+        let mode = match icons {
+            ToolbarIcons::Icon => "icon",
+            ToolbarIcons::IconAndText => "icon-and-text",
+            ToolbarIcons::TextOnly => "text-only",
+        };
+        let script = format!("window.mdvrSetToolbarIcons('{mode}');");
+        if self.pending_state.page_ready() {
+            evaluate_javascript(&self.view, &script);
+        } else {
+            self.pending_state.toolbar_icons = Some(script);
         }
     }
 

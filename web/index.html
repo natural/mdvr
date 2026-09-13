@@ -10,21 +10,20 @@
       body { margin: 0; background: Canvas; color: CanvasText; }
       #search { position: fixed; z-index: 2; top: .2rem; right: .75rem; display: flex; gap: .35rem; padding: .2rem .35rem; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius: .4rem; background: Canvas; box-shadow: 0 .2rem .8rem #0004; }
       #search[hidden] { display: none; }
-      [data-toolbar-hidden="true"] #history,
-      [data-toolbar-hidden="true"] #theme,
-      [data-toolbar-hidden="true"] #outline-toggle { opacity: 0; pointer-events: none; }
+      [data-toolbar-hidden="true"] #history { opacity: 0; pointer-events: none; }
       :root::-webkit-scrollbar { width: 12px; }
       :root::-webkit-scrollbar-thumb { background: transparent; border-radius: 6px; }
       [data-scrollbar-visible="true"] { scrollbar-color: CanvasText transparent; }
       [data-scrollbar-visible="true"]::-webkit-scrollbar-thumb { background: color-mix(in srgb, CanvasText 50%, transparent); }
       #search input[type="search"] { width: 16rem; font: inherit; }
       #search button { font: inherit; }
-      #outline-toggle { position: fixed; z-index: 2; left: 4.5rem; top: .2rem; font: inherit; transition: opacity .15s; }
       #history { position: fixed; z-index: 2; left: 7rem; top: .2rem; display: flex; gap: .25rem; padding: .2rem .35rem; transition: opacity .15s; }
       #history button { font: inherit; }
-      #theme { position: fixed; z-index: 2; right: 22rem; top: .2rem; font: inherit; transition: opacity .15s; }
+      #history .toolbar-label { display: none; }
+      [data-toolbar-icons="icon-and-text"] #history .toolbar-label { display: inline; }
+      [data-toolbar-icons="text-only"] #history .toolbar-icon { display: none; }
       #outline { position: fixed; z-index: 2; left: .75rem; top: 3.5rem; max-width: min(20rem, 45vw); max-height: calc(100vh - 4.25rem); overflow: auto; padding: .75rem; border-radius: .4rem; background: Canvas; box-shadow: 0 .2rem .8rem #0004; }
-      #outline[hidden], #outline-toggle[hidden] { display: none; }
+      #outline[hidden] { display: none; }
       #outline a { display: block; color: inherit; padding: .15rem 0; text-decoration: none; }
       #palette { position: fixed; z-index: 3; inset: 15% 20% auto; display: grid; gap: .35rem; padding: 1rem; border-radius: .5rem; background: Canvas; box-shadow: 0 .4rem 2rem #0008; }
       #palette[hidden] { display: none; }
@@ -33,42 +32,28 @@
       #status[hidden] { display: none; }
       #status button { font: inherit; }
       @media (max-width: 54rem) {
-        #history { left: .75rem; right: .75rem; top: 3.5rem; overflow-x: auto; }
-        #theme { right: .75rem; }
+        #history { left: 4.5rem; right: .75rem; top: .2rem; overflow-x: auto; }
       }
       @media (max-width: 38rem) {
-        #outline, #outline-toggle { display: none !important; }
+        #outline { display: none !important; }
       }
     </style>
   </head>
   <body>
-    <button id="outline-toggle" type="button" aria-expanded="false" hidden>Contents</button>
     <div id="history" aria-label="Document navigation">
       <button type="button" data-history="back" aria-label="Back" disabled>←</button>
       <button type="button" data-history="forward" aria-label="Forward" disabled>→</button>
-      <button type="button" data-history="reload">Reload</button>
-      <button type="button" data-open="file">Open File</button>
-      <button type="button" data-open="folder">Open Folder</button>
-      <button type="button" data-copy-source>Copy Markdown</button>
-      <button type="button" data-copy-rendered>Copy Rendered</button>
+      <button type="button" data-open="file" aria-label="Open File" title="Open File"><span class="toolbar-icon" aria-hidden="true">▱</span><span class="toolbar-label">Open File</span></button>
+      <button type="button" data-open="folder" aria-label="Open Folder" title="Open Folder"><span class="toolbar-icon" aria-hidden="true">▰</span><span class="toolbar-label">Open Folder</span></button>
+      <button type="button" data-copy-source aria-label="Copy Markdown" title="Copy Markdown"><span class="toolbar-icon" aria-hidden="true">⧉</span><span class="toolbar-label">Copy Markdown</span></button>
+      <button type="button" data-copy-rendered aria-label="Copy Rendered" title="Copy Rendered"><span class="toolbar-icon" aria-hidden="true">◈</span><span class="toolbar-label">Copy Rendered</span></button>
     </div>
-    <select id="theme" aria-label="Reader theme">
-      <option value="system">System</option>
-      <option value="light">Light</option>
-      <option value="dark">Dark</option>
-      <option value="__import__">Import Zed theme…</option>
-    </select>
-    <nav id="outline" aria-label="Document outline" hidden></nav>
     <div id="palette" role="dialog" aria-label="Command palette" hidden>
       <button type="button" data-command="open-file">Open File</button>
       <button type="button" data-command="open-folder">Open Folder</button>
       <button type="button" data-command="picker">Browse Current Folder</button>
       <button type="button" data-command="copy-source">Copy Markdown</button>
       <button type="button" data-command="copy-rendered">Copy Rendered</button>
-      <button type="button" data-command="toggle-outline">Toggle Contents</button>
-      <button type="button" data-command="theme-system">Use System Theme</button>
-      <button type="button" data-command="theme-light">Use Light Theme</button>
-      <button type="button" data-command="theme-dark">Use Dark Theme</button>
     </div>
     <div id="status" role="alert" hidden><span></span><button type="button">Dismiss</button></div>
     <form id="search" role="search" hidden>
@@ -85,6 +70,9 @@
         let scrollbarMode = "show-on-scroll";
         const updateToolbar = (hidden) => {
           document.documentElement.dataset.toolbarHidden = String(hidden);
+        };
+        window.mdvrSetToolbarIcons = (mode) => {
+          document.documentElement.dataset.toolbarIcons = mode;
         };
         window.mdvrSetToolbarVisibility = (mode) => {
           toolbarMode = mode;
@@ -328,13 +316,6 @@
         window.mdvrMoveSearch = (step) => postNativeAction({ kind: 'search', payload: { kind: step < 0 ? 'previous' : 'next' } });
         window.mdvrCopyCode = () => postNativeAction({ kind: 'copy', payload: { kind: 'code' } });
         window.mdvrSelectAll = () => postNativeAction({ kind: 'select_all' });
-        const outline = document.querySelector('#outline');
-        const outlineToggle = document.querySelector('#outline-toggle');
-        outlineToggle.addEventListener('click', () => {
-          outline.hidden = !outline.hidden;
-          outlineToggle.setAttribute('aria-expanded', String(!outline.hidden));
-          postNativeAction({ kind: 'outline', payload: outline.hidden ? 'close' : 'open' });
-        });
         const status = document.querySelector('#status');
         status.querySelector('button').addEventListener('click', () => { status.hidden = true; });
         window.mdvrShowError = (message) => {
@@ -348,42 +329,24 @@
           document.querySelector('[data-history="back"]').disabled = !back;
           document.querySelector('[data-history="forward"]').disabled = !forward;
         };
-        window.mdvrSetThemeChoices = (names, selected) => {
-          const chooser = document.querySelector('#theme');
-          chooser.querySelectorAll('option[data-imported]').forEach((option) => option.remove());
-          const importOption = chooser.querySelector('[value="__import__"]');
-          for (const name of names) {
-            const option = document.createElement('option');
-            option.value = name;
-            option.textContent = name;
-            option.dataset.imported = '';
-            chooser.insertBefore(option, importOption);
-          }
-          if (selected && chooser.querySelector(`option[value="${CSS.escape(selected)}"]`)) chooser.value = selected;
-        };
-        document.querySelector('#theme').addEventListener('change', (event) => {
-          const value = event.target.value;
-          let payload = { named: { name: value } };
-          if (value === '__import__') payload = 'import';
-          else if (['system', 'light', 'dark'].includes(value)) payload = value;
-          postNativeAction({ kind: 'theme', payload });
-        });
+        window.mdvrSetThemeChoices = () => {};
         document.querySelector('#history').addEventListener('click', async (event) => {
-          if (!(event.target instanceof HTMLButtonElement)) return;
-          if (event.target.hasAttribute('data-copy-source')) {
+          const button = event.target.closest?.('button');
+          if (!(button instanceof HTMLButtonElement)) return;
+          if (button.hasAttribute('data-copy-source')) {
             if (await window.mdvrCopySource?.()) postNativeAction({ kind: 'copy', payload: { kind: 'source' } });
             return;
           }
-          if (event.target.hasAttribute('data-copy-rendered')) {
+          if (button.hasAttribute('data-copy-rendered')) {
             if (await window.mdvrCopyRendered?.()) postNativeAction({ kind: 'copy', payload: { kind: 'rendered' } });
             return;
           }
-          if (event.target.dataset.open) {
-            postNativeAction({ kind: 'open', payload: event.target.dataset.open });
+          if (button.dataset.open) {
+            postNativeAction({ kind: 'open', payload: button.dataset.open });
             return;
           }
           postPosition();
-          postNativeAction({ kind: 'history', payload: event.target.dataset.history });
+          postNativeAction({ kind: 'history', payload: button.dataset.history });
         });
         const palette = document.querySelector('#palette');
         const openPalette = () => {
@@ -403,8 +366,6 @@
           else if (command === 'picker') postNativeAction({ kind: 'open', payload: 'picker' });
           else if (command === 'copy-source' && await window.mdvrCopySource?.()) postNativeAction({ kind: 'copy', payload: { kind: 'source' } });
           else if (command === 'copy-rendered' && await window.mdvrCopyRendered?.()) postNativeAction({ kind: 'copy', payload: { kind: 'rendered' } });
-          else if (command === 'toggle-outline') outlineToggle.click();
-          else if (command?.startsWith('theme-')) postNativeAction({ kind: 'theme', payload: command.slice(6) });
           closePalette();
         });
         const search = document.querySelector('#search');

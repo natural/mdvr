@@ -60,9 +60,7 @@ test("raw HTML image placeholders remain retryable", () => {
 
 test("narrow layout hides outline and keeps toolbar clear of content", () => {
   expect(html).toContain("@media (max-width: 38rem)");
-  expect(html).toContain(
-    "#outline, #outline-toggle { display: none !important; }",
-  );
+  expect(html).toContain("#outline { display: none !important; }");
   expect(readerCss).toContain("padding: 7rem 1rem 1rem");
 });
 
@@ -130,13 +128,9 @@ test("history controls and shortcuts stay native-owned", () => {
   expect(html).not.toContain("history.back");
 });
 
-test("theme chooser sends only closed native choices", () => {
-  expect(html).toContain('aria-label="Reader theme"');
-  expect(html).toContain("kind: 'theme'");
-  expect(html).toContain(
-    "['system', 'light', 'dark', 'import'].includes(action.payload)",
-  );
-  expect(html).toContain("action.payload?.named");
+test("theme control stays out of toolbar", () => {
+  expect(html).not.toContain('aria-label="Reader theme"');
+  expect(html).not.toContain('id="theme"');
   expect(main).toContain("theme.value = value.mode");
 });
 
@@ -169,8 +163,8 @@ test("reload restores visible block and unchanged selection", () => {
   expect(main).toContain("view.selection.startBlock");
 });
 
-test("outline is generated safely from rendered headings", () => {
-  expect(html).toContain('aria-label="Document outline"');
+test("outline generation stays safe without a Contents control", () => {
+  expect(html).not.toContain('id="outline-toggle"');
   expect(main).toContain("for (const heading of model.headings)");
   expect(main).toContain("link.textContent = heading.text");
   expect(main).toContain("installOutline(model)");

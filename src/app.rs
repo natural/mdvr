@@ -13,8 +13,8 @@ use std::{
 
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Menu, MenuItem, Render,
-    SystemMenuType, Task, Timer, Window, WindowAppearance, WindowBounds, WindowOptions, actions,
-    div, point, prelude::*, px, size,
+    SystemMenuType, Task, Timer, Window, WindowAppearance, WindowBounds, WindowControlArea,
+    WindowOptions, actions, div, point, prelude::*, px, size,
 };
 
 actions!(
@@ -55,7 +55,7 @@ use crate::{
     },
     preferences::{
         DisplayBounds, LaunchIntent, Preferences, ReadingLocator, ScrollbarVisibility,
-        WindowGeometry, conventional_path, load_or_default, resolve_launch, save,
+        ToolbarIcons, WindowGeometry, conventional_path, load_or_default, resolve_launch, save,
     },
     theme::{
         AppearanceMode, Theme, ThemeFamily, ZedFonts, default_theme, import_file, load_zed_config,
@@ -818,6 +818,7 @@ impl MdvrView {
                 web_view.set_fonts(fonts);
             }
             web_view.set_scrollbar_visibility(self.preferences.scrollbar_visibility);
+            web_view.set_toolbar_icons(self.preferences.toolbar_icons);
             web_view.set_toolbar_visibility(self.toolbar_visibility);
         }
         if self.appearance_mode == Some(mode) {
@@ -1521,7 +1522,28 @@ impl Render for MdvrView {
         }
         if let Some(web_view) = self.web_view.as_ref() {
             web_view.sync_frame();
-            return div().size_full().into_any_element();
+            return div()
+                .relative()
+                .size_full()
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .w(px(72.0))
+                        .h(px(28.0))
+                        .window_control_area(WindowControlArea::Drag),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left(px(340.0))
+                        .right_0()
+                        .h(px(28.0))
+                        .window_control_area(WindowControlArea::Drag),
+                )
+                .into_any_element();
         }
         if let Some((path, bytes)) = self.pending_large.as_ref() {
             return div()
@@ -1739,6 +1761,14 @@ impl Render for PreferencesView {
             .child(div().text_xl().child("Preferences"))
             .child(div().child(format!("Theme: {theme}")))
             .child(div().child(format!(
+                "Toolbar Icons: {}",
+                match self.preferences.toolbar_icons {
+                    ToolbarIcons::Icon => "Icon",
+                    ToolbarIcons::IconAndText => "Icon + Text",
+                    ToolbarIcons::TextOnly => "Text Only",
+                }
+            )))
+            .child(div().child(format!(
                 "Scrollbar: {}",
                 match self.preferences.scrollbar_visibility {
                     ScrollbarVisibility::Hide => "Hidden",
@@ -1749,6 +1779,24 @@ impl Render for PreferencesView {
             .child(
                 div()
                     .id("preferences-toolbar")
+                    .px_3()
+                    .py_2()
+                    .rounded_sm()
+                    .cursor_pointer()
+                    .bg(gpui::rgb(0x3c4043))
+                    .child("Cycle toolbar icons")
+                    .on_click(cx.listener(|view, _, _, _| {
+                        view.preferences.toolbar_icons = match view.preferences.toolbar_icons {
+                            ToolbarIcons::Icon => ToolbarIcons::IconAndText,
+                            ToolbarIcons::IconAndText => ToolbarIcons::TextOnly,
+                            ToolbarIcons::TextOnly => ToolbarIcons::Icon,
+                        };
+                        view.save();
+                    })),
+            )
+            .child(
+                div()
+                    .id("preferences-scrollbar")
                     .px_3()
                     .py_2()
                     .rounded_sm()

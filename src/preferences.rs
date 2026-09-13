@@ -34,6 +34,15 @@ pub enum ScrollbarVisibility {
     ShowOnScroll,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ToolbarIcons {
+    #[default]
+    Icon,
+    IconAndText,
+    TextOnly,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PreferencesError {
     Io(String),
@@ -176,6 +185,8 @@ pub struct Preferences {
     pub use_zed_config: bool,
     #[serde(default, alias = "toolbar_visibility")]
     pub scrollbar_visibility: ScrollbarVisibility,
+    #[serde(default)]
+    pub toolbar_icons: ToolbarIcons,
     #[serde(default = "default_text_scale")]
     pub text_scale_percent: u16,
     #[serde(default)]
@@ -201,6 +212,7 @@ impl Default for Preferences {
             theme_file: None,
             use_zed_config: true,
             scrollbar_visibility: ScrollbarVisibility::default(),
+            toolbar_icons: ToolbarIcons::default(),
             text_scale_percent: DEFAULT_TEXT_SCALE_PERCENT,
             window: WindowGeometry::default(),
         }
