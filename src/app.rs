@@ -36,7 +36,7 @@ use crate::{
     contracts::{
         ActionMessage, ActionMessageEnvelope, ErrorCode, Generation, LocatorFallback,
         NavigationRequest, NavigationTarget, ResourceKind, ResourceReference, ResourceRequest,
-        ResourceResult, ResourceResultValue, RootId, ScanId, SearchAction,
+        ResourceResult, ResourceResultValue, RootId, ScanId, SearchAction, WindowAction,
     },
     files::{
         DiscoveryEvent, DiscoveryScanner, LARGE_SOURCE_CONFIRM_BYTES, LoadError, LoadedSource,
@@ -59,7 +59,8 @@ use crate::{
         ToolbarIcons, WindowGeometry, conventional_path, load_or_default, resolve_launch, save,
     },
     theme::{
-        AppearanceMode, Theme, ThemeFamily, ZedFonts, default_theme, import_file, load_zed_config,
+        AppearanceMode, Theme, ThemeFamily, ZedFonts, default_family, default_theme, import_file,
+        load_zed_config,
     },
     ui::{FocusOwner, ShellCommand, ShellState},
 };
@@ -282,7 +283,10 @@ fn dispatch_bridge_action(
             crate::contracts::TextScaleAction::Decrease => ShellCommand::DecreaseTextSize,
             crate::contracts::TextScaleAction::Reset => ShellCommand::ResetTextSize,
         }),
-        ActionMessage::History(_) | ActionMessage::Theme(_) | ActionMessage::Open(_) => {}
+        ActionMessage::History(_)
+        | ActionMessage::Theme(_)
+        | ActionMessage::Open(_)
+        | ActionMessage::Window(_) => {}
         ActionMessage::CapturePosition(_) | ActionMessage::RestorePosition(_) => {
             unreachable!("router filters bridge actions")
         }
@@ -354,12 +358,7 @@ impl MdvrView {
             .theme_file
             .as_deref()
             .and_then(|theme_path| import_file(theme_path).ok())
-            .or_else(|| {
-                self.zed_theme.clone().map(|theme| ThemeFamily {
-                    name: "Zed theme".into(),
-                    members: vec![theme],
-                })
-            });
+            .or_else(|| Some(default_family()));
         self.appearance_mode = None;
         self.toolbar_visibility = ScrollbarVisibility::ShowOnScroll;
     }
@@ -469,12 +468,7 @@ impl MdvrView {
             .theme_file
             .as_deref()
             .and_then(|path| import_file(path).ok())
-            .or_else(|| {
-                self.zed_theme.clone().map(|theme| ThemeFamily {
-                    name: "Zed theme".into(),
-                    members: vec![theme],
-                })
-            });
+            .or_else(|| Some(default_family()));
         if let Some(path) = missing_dock_document(launch, &self.preferences) {
             self.failed_path = Some(path.clone());
             self.report_error(format!(
@@ -1023,6 +1017,11 @@ impl MdvrView {
                             ActionMessage::History(crate::contracts::HistoryAction::Reload) => {
                                 self.reload(cx)
                             }
+                            ActionMessage::Window(WindowAction::BeginDrag) => {
+                                if let Some(web_view) = self.web_view.as_ref() {
+                                    web_view.begin_window_drag();
+                                }
+                            }
                             _ => {}
                         }
                         if focus_renderer && let Some(web_view) = self.web_view.as_ref() {
@@ -1564,12 +1563,22 @@ impl Render for MdvrView {
             self.update_appearance(window);
             self.capture_window_geometry(window);
         }
-        let picker_dark = match self.appearance_mode {
-            Some(AppearanceMode::Dark) => true,
-            Some(AppearanceMode::Light) => false,
-            _ => matches!(
-                window.appearance(),
-                WindowAppearance::Dark | WindowAppearance::VibrantDark
+        let picker_dark = match self.preferences.theme.as_deref() {
+            Some("light") => false,
+            Some("dark") => true,
+            Some(name) => self
+                .theme_family
+                .as_ref()
+                .and_then(|family| family.member(name))
+                .is_none_or(|theme| theme.tokens.mode == AppearanceMode::Dark),
+            None => self.zed_theme.as_ref().map_or_else(
+                || {
+                    matches!(
+                        window.appearance(),
+                        WindowAppearance::Dark | WindowAppearance::VibrantDark
+                    )
+                },
+                |theme| theme.tokens.mode == AppearanceMode::Dark,
             ),
         };
         let picker_bg = if picker_dark {
@@ -1821,6 +1830,8 @@ impl PreferencesView {
         self.preferences.theme = match self.preferences.theme.as_deref() {
             None => Some("light".into()),
             Some("light") => Some("dark".into()),
+            Some("dark") => Some("Tokyo Night — Light".into()),
+            Some("Tokyo Night — Light") => Some("Tokyo Night — Dark".into()),
             _ => None,
         };
         self.save();
@@ -2019,7 +2030,7 @@ fn open_new_window(cx: &mut App, path: PathBuf, intent: LaunchIntent) {
 
 fn open_file_action(_: &OpenFileAction, cx: &mut App) {
     if let Some(path) = choose_markdown_file() {
-        open_new_window(cx, path, LaunchIntent::ExplicitFile);
+        cx.defer(move |cx| open_new_window(cx, path, LaunchIntent::ExplicitFile));
     }
 }
 
@@ -2043,7 +2054,7 @@ fn show_picker_action(_: &ShowPicker, cx: &mut App) {
 
 fn open_folder_action(_: &OpenFolderAction, cx: &mut App) {
     if let Some(path) = choose_directory() {
-        open_new_window(cx, path, LaunchIntent::ExplicitDirectory);
+        cx.defer(move |cx| open_new_window(cx, path, LaunchIntent::ExplicitDirectory));
     }
 }
 
@@ -2064,6 +2075,11 @@ fn show_preferences(_: &ShowPreferences, cx: &mut App) {
                 origin: point(px(300.0), px(200.0)),
                 size: size(px(420.0), px(280.0)),
             })),
+            titlebar: Some(gpui::TitlebarOptions {
+                title: Some("Preferences".into()),
+                appears_transparent: true,
+                traffic_light_position: None,
+            }),
             is_resizable: true,
             ..WindowOptions::default()
         },

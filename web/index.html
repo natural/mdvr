@@ -108,6 +108,7 @@
           if (action.kind === 'history') return Object.keys(action).length === 2 && ['back', 'forward', 'reload'].includes(action.payload);
           if (action.kind === 'theme') return Object.keys(action).length === 2 && (['system', 'light', 'dark', 'import'].includes(action.payload) || (action.payload?.named && typeof action.payload.named.name === 'string'));
           if (action.kind === 'open') return Object.keys(action).length === 2 && ['file', 'folder', 'picker'].includes(action.payload);
+          if (action.kind === 'window') return Object.keys(action).length === 2 && action.payload === 'begin_drag';
           if (action.kind === 'focus') return Object.keys(action).length === 2 && ['shell', 'picker', 'search', 'palette', 'renderer'].includes(action.payload);
           if (action.kind === 'copy') return action.payload && Object.keys(action).length === 2 && ['source', 'code', 'rendered'].includes(action.payload.kind);
           if (action.kind !== 'search' || !action.payload || Object.keys(action).length !== 2) return false;
@@ -330,6 +331,11 @@
           document.querySelector('[data-history="forward"]').disabled = !forward;
         };
         window.mdvrSetThemeChoices = () => {};
+        document.addEventListener('pointerdown', (event) => {
+          if (event.button === 0 && event.clientY < 32 && !event.target.closest?.('button, input, select')) {
+            postNativeAction({ kind: 'window', payload: 'begin_drag' });
+          }
+        });
         document.querySelector('#history').addEventListener('click', async (event) => {
           const button = event.target.closest?.('button');
           if (!(button instanceof HTMLButtonElement)) return;

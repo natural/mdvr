@@ -689,6 +689,18 @@ impl EmbeddedWebView {
         self.view.focus().is_ok()
     }
 
+    pub fn begin_window_drag(&self) {
+        assert!(main_thread(), "Wry WebView must be used on main thread");
+        unsafe {
+            let app: id = cocoa::appkit::NSApp();
+            let event: id = msg_send![app, currentEvent];
+            let window: id = msg_send![self.parent, window];
+            if window != nil && event != nil {
+                let _: () = msg_send![window, performWindowDragWithEvent: event];
+            }
+        }
+    }
+
     pub fn sync_frame(&self) {
         assert!(main_thread(), "Wry WebView must be used on main thread");
         unsafe {
