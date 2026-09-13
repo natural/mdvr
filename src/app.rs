@@ -12,7 +12,7 @@ use std::{
 };
 
 use gpui::{
-    App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Menu, MenuItem,
+    App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Menu, MenuItem, MouseButton,
     PathPromptOptions, Render, Subscription, SystemMenuType, Task, Timer, Window, WindowAppearance,
     WindowBounds, WindowOptions, actions, div, point, prelude::*, px, size,
 };
@@ -44,14 +44,14 @@ use crate::{
     },
     navigation::{LoadRequest, Locator, NavigationAction, NavigationState},
     platform::{
-        EmbeddedWebView,
+        EmbeddedWebView, begin_window_drag,
         bridge::{BridgeContext, BridgeMessage},
         confirm_large_document, confirm_outside_resource, confirm_remote_images, file_url_path,
         open_external_url, open_local_file,
         remote_fetch::fetch_image,
         remote_policy::{RemoteLimits, RemotePolicy},
         resource_policy::{ResourceAuthorization, ResourceDenied, ResourcePolicy},
-        set_window_appearance,
+        set_window_appearance, set_window_background_draggable,
     },
     preferences::{
         DisplayBounds, LaunchIntent, Preferences, ReadingLocator, ScrollbarVisibility,
@@ -71,6 +71,17 @@ struct OpenRequest {
 }
 
 static OPEN_PATHS: OnceLock<Mutex<VecDeque<OpenRequest>>> = OnceLock::new();
+const MAIN_TITLEBAR_HEIGHT: f64 = 38.0;
+
+fn main_window_frame(titlebar: gpui::AnyElement, content: gpui::AnyElement) -> gpui::AnyElement {
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .child(titlebar)
+        .child(div().flex_1().min_h_0().child(content))
+        .into_any_element()
+}
 
 fn decode_open_request(path: PathBuf) -> Option<OpenRequest> {
     if path.extension().and_then(|value| value.to_str()) != Some("mdvr-request") {
@@ -366,15 +377,13 @@ struct MdvrView {
 }
 
 impl MdvrView {
-    fn cycle_toolbar_visibility(&mut self) {
+    fn cycle_toolbar_visibility(&mut self, cx: &mut Context<Self>) {
         self.toolbar_visibility = match self.toolbar_visibility {
             ScrollbarVisibility::ShowOnScroll => ScrollbarVisibility::Show,
             ScrollbarVisibility::Show => ScrollbarVisibility::Hide,
             ScrollbarVisibility::Hide => ScrollbarVisibility::ShowOnScroll,
         };
-        if let Some(web_view) = self.web_view.as_mut() {
-            web_view.set_toolbar_visibility(self.toolbar_visibility);
-        }
+        cx.notify();
     }
 
     fn new(shell: ShellState, navigation: NavigationState, cx: &mut Context<Self>) -> Self {
@@ -650,7 +659,7 @@ impl MdvrView {
         cx: &mut Context<Self>,
     ) {
         let path = source.path.clone();
-        let Some(mut web_view) = EmbeddedWebView::attach(window) else {
+        let Some(mut web_view) = EmbeddedWebView::attach(window, MAIN_TITLEBAR_HEIGHT) else {
             self.failed_path = Some(path.clone());
             self.report_error("Wry WebView attachment failed".into());
             return;
@@ -687,7 +696,7 @@ impl MdvrView {
         self.update_appearance(window);
         self.save_preferences();
         if let Some(web_view) = self.web_view.as_ref() {
-            web_view.sync_frame();
+            web_view.sync_frame(MAIN_TITLEBAR_HEIGHT);
             let _ = web_view.focus();
         }
         cx.notify();
@@ -771,16 +780,11 @@ impl MdvrView {
                     .map_err(|error| eprintln!("mdvr: cannot establish resource policy: {error:?}"))
                     .ok()
             });
-        if let Some(web_view) = self.web_view.as_mut() {
-            if let Err(error) =
+        if let Some(web_view) = self.web_view.as_mut()
+            && let Err(error) =
                 web_view.set_navigation_context(context.document, context.generation)
-            {
-                eprintln!("mdvr: cannot update renderer navigation context: {error}");
-            }
-            web_view.set_history_availability(
-                self.navigation.can_go_back(),
-                self.navigation.can_go_forward(),
-            );
+        {
+            eprintln!("mdvr: cannot update renderer navigation context: {error}");
         }
     }
 
@@ -909,8 +913,6 @@ impl MdvrView {
                 web_view.set_fonts(fonts);
             }
             web_view.set_scrollbar_visibility(self.preferences.scrollbar_visibility);
-            web_view.set_toolbar_icons(self.preferences.toolbar_icons);
-            web_view.set_toolbar_visibility(self.toolbar_visibility);
         }
         let tokens = selected_theme
             .map(|theme| theme.tokens.clone())
@@ -1136,7 +1138,7 @@ impl MdvrView {
         let Some(current) = self.navigation.current().cloned() else {
             return;
         };
-        let Some(mut web_view) = EmbeddedWebView::attach(window) else {
+        let Some(mut web_view) = EmbeddedWebView::attach(window, MAIN_TITLEBAR_HEIGHT) else {
             self.report_error("Wry WebView attachment failed".into());
             return;
         };
@@ -1581,6 +1583,151 @@ impl MdvrView {
             }
         }
     }
+
+    fn toolbar_text(&self, icon: &str, label: &str) -> String {
+        match self.preferences.toolbar_icons {
+            ToolbarIcons::Icon => icon.into(),
+            ToolbarIcons::IconAndText => format!("{icon}  {label}"),
+            ToolbarIcons::TextOnly => label.into(),
+        }
+    }
+
+    fn titlebar(&self, dark: bool, title: &str, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let background = if dark {
+            gpui::rgb(0x29292b)
+        } else {
+            gpui::rgb(0xe9e9e9)
+        };
+        let foreground = if dark {
+            gpui::rgb(0xf2f2f2)
+        } else {
+            gpui::rgb(0x202020)
+        };
+        let button_hover = if dark {
+            gpui::rgb(0x444446)
+        } else {
+            gpui::rgb(0xd3d3d3)
+        };
+        let drag = |id| {
+            div()
+                .id(id)
+                .h_full()
+                .on_mouse_down(MouseButton::Left, |_, window, _| {
+                    begin_window_drag(window);
+                })
+        };
+        let mut bar = div()
+            .h(px(MAIN_TITLEBAR_HEIGHT as f32))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .gap_1()
+            .bg(background)
+            .text_color(foreground)
+            .border_b_1()
+            .border_color(if dark {
+                gpui::rgb(0x1d1d1f)
+            } else {
+                gpui::rgb(0xc9c9c9)
+            })
+            .child(drag("titlebar-drag-left").w(px(72.0)));
+
+        if self.web_view.is_some() && self.toolbar_visibility != ScrollbarVisibility::Hide {
+            bar = bar
+                .child(
+                    div()
+                        .id("titlebar-back")
+                        .px_2()
+                        .py_1()
+                        .rounded_sm()
+                        .cursor_pointer()
+                        .when(!self.navigation.can_go_back(), |button| {
+                            button.opacity(0.35)
+                        })
+                        .hover(move |style| style.bg(button_hover))
+                        .child("‹")
+                        .on_click(cx.listener(|view, _, _, cx| view.go_back(cx))),
+                )
+                .child(
+                    div()
+                        .id("titlebar-forward")
+                        .px_2()
+                        .py_1()
+                        .rounded_sm()
+                        .cursor_pointer()
+                        .when(!self.navigation.can_go_forward(), |button| {
+                            button.opacity(0.35)
+                        })
+                        .hover(move |style| style.bg(button_hover))
+                        .child("›")
+                        .on_click(cx.listener(|view, _, _, cx| view.go_forward(cx))),
+                )
+                .child(
+                    div()
+                        .id("titlebar-open-file")
+                        .px_2()
+                        .py_1()
+                        .rounded_sm()
+                        .cursor_pointer()
+                        .hover(move |style| style.bg(button_hover))
+                        .child(self.toolbar_text("▱", "Open File"))
+                        .on_click(|_, _, cx| cx.defer(prompt_for_document)),
+                )
+                .child(
+                    div()
+                        .id("titlebar-open-folder")
+                        .px_2()
+                        .py_1()
+                        .rounded_sm()
+                        .cursor_pointer()
+                        .hover(move |style| style.bg(button_hover))
+                        .child(self.toolbar_text("▰", "Open Folder"))
+                        .on_click(|_, _, cx| cx.defer(prompt_for_directory)),
+                )
+                .child(
+                    div()
+                        .id("titlebar-copy-markdown")
+                        .px_2()
+                        .py_1()
+                        .rounded_sm()
+                        .cursor_pointer()
+                        .hover(move |style| style.bg(button_hover))
+                        .child(self.toolbar_text("⧉", "Copy Markdown"))
+                        .on_click(cx.listener(|view, _, _, _| {
+                            if let Some(web_view) = view.web_view.as_ref() {
+                                web_view.copy_source();
+                            }
+                        })),
+                )
+                .child(
+                    div()
+                        .id("titlebar-copy-rendered")
+                        .px_2()
+                        .py_1()
+                        .rounded_sm()
+                        .cursor_pointer()
+                        .hover(move |style| style.bg(button_hover))
+                        .child(self.toolbar_text("◈", "Copy Rendered"))
+                        .on_click(cx.listener(|view, _, _, _| {
+                            if let Some(web_view) = view.web_view.as_ref() {
+                                web_view.copy_rendered();
+                            }
+                        })),
+                );
+        }
+
+        bar.child(
+            drag("titlebar-drag-center")
+                .flex_1()
+                .min_w(px(32.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_sm()
+                .child(title.to_owned()),
+        )
+        .into_any_element()
+    }
 }
 
 impl Drop for MdvrView {
@@ -1604,8 +1751,10 @@ impl Render for MdvrView {
             .as_deref()
             .and_then(std::path::Path::file_name)
             .and_then(|name| name.to_str())
-            .unwrap_or("mdvr");
-        window.set_window_title(title);
+            .unwrap_or("mdvr")
+            .to_owned();
+        window.set_window_title(&title);
+        set_window_background_draggable(window, self.web_view.is_some());
         self.process_next_open(window, cx);
         if self.initialized {
             self.update_appearance(window);
@@ -1644,15 +1793,16 @@ impl Render for MdvrView {
         } else {
             gpui::rgb(0x5f6368)
         };
+        let titlebar = self.titlebar(picker_dark, &title, cx);
         if self.loading_document {
-            return div().size_full().bg(picker_bg).into_any_element();
+            return main_window_frame(titlebar, div().size_full().bg(picker_bg).into_any_element());
         }
         if let Some(web_view) = self.web_view.as_ref() {
-            web_view.sync_frame();
-            return div().size_full().into_any_element();
+            web_view.sync_frame(MAIN_TITLEBAR_HEIGHT);
+            return main_window_frame(titlebar, div().size_full().into_any_element());
         }
         if let Some((path, bytes)) = self.pending_large.as_ref() {
-            return div()
+            let content = div()
                 .size_full()
                 .flex()
                 .flex_col()
@@ -1680,12 +1830,13 @@ impl Render for MdvrView {
                         })),
                 )
                 .into_any_element();
+            return main_window_frame(titlebar, content);
         }
         window.focus(&self.picker_focus);
         let selected = self.shell.picker.selected().map(str::to_owned);
         let entries = self.shell.picker.visible();
         let can_retry = self.failed_path.is_some();
-        div()
+        let content = div()
             .id("picker")
             .track_focus(&self.picker_focus)
             .on_key_down(cx.listener(|view, event, window, cx| {
@@ -1802,7 +1953,8 @@ impl Render for MdvrView {
                     )
                 },
             )
-            .into_any_element()
+            .into_any_element();
+        main_window_frame(titlebar, content)
     }
 }
 
@@ -2114,7 +2266,7 @@ fn close_window_action(_: &CloseWindow, cx: &mut App) {
 
 fn cycle_toolbar_visibility_action(_: &CycleToolbarVisibility, cx: &mut App) {
     if let Some(window) = active_mdvr_window(cx) {
-        let _ = window.update(cx, |view, _, _| view.cycle_toolbar_visibility());
+        let _ = window.update(cx, |view, _, cx| view.cycle_toolbar_visibility(cx));
     }
 }
 
@@ -2233,7 +2385,7 @@ fn open_mdvr_window(cx: &mut App, launch: LaunchPlan, announce: bool) {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("mdvr".into()),
-                appears_transparent: false,
+                appears_transparent: true,
                 traffic_light_position: None,
             }),
             is_resizable: true,

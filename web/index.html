@@ -10,18 +10,12 @@
       body { margin: 0; background: Canvas; color: CanvasText; }
       #search { position: fixed; z-index: 2; top: .2rem; right: .75rem; display: flex; gap: .35rem; padding: .2rem .35rem; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius: .4rem; background: Canvas; box-shadow: 0 .2rem .8rem #0004; }
       #search[hidden] { display: none; }
-      [data-toolbar-hidden="true"] #history { opacity: 0; pointer-events: none; }
       :root::-webkit-scrollbar { width: 12px; }
       :root::-webkit-scrollbar-thumb { background: transparent; border-radius: 6px; }
       [data-scrollbar-visible="true"] { scrollbar-color: CanvasText transparent; }
       [data-scrollbar-visible="true"]::-webkit-scrollbar-thumb { background: color-mix(in srgb, CanvasText 50%, transparent); }
       #search input[type="search"] { width: 16rem; font: inherit; }
       #search button { font: inherit; }
-      #history { position: fixed; z-index: 2; left: 7rem; top: .2rem; display: flex; gap: .25rem; padding: .2rem .35rem; transition: opacity .15s; }
-      #history button { font: inherit; }
-      #history .toolbar-label { display: none; }
-      [data-toolbar-icons="icon-and-text"] #history .toolbar-label { display: inline; }
-      [data-toolbar-icons="text-only"] #history .toolbar-icon { display: none; }
       #outline { position: fixed; z-index: 2; left: .75rem; top: 3.5rem; max-width: min(20rem, 45vw); max-height: calc(100vh - 4.25rem); overflow: auto; padding: .75rem; border-radius: .4rem; background: Canvas; box-shadow: 0 .2rem .8rem #0004; }
       #outline[hidden] { display: none; }
       #outline a { display: block; color: inherit; padding: .15rem 0; text-decoration: none; }
@@ -31,23 +25,12 @@
       #status { position: fixed; z-index: 4; left: 50%; bottom: 1rem; translate: -50% 0; display: flex; gap: .75rem; align-items: center; max-width: min(42rem, 90vw); padding: .65rem .85rem; border-radius: .4rem; background: Canvas; color: CanvasText; box-shadow: 0 .2rem .8rem #0006; }
       #status[hidden] { display: none; }
       #status button { font: inherit; }
-      @media (max-width: 54rem) {
-        #history { left: 4.5rem; right: .75rem; top: .2rem; overflow-x: auto; }
-      }
       @media (max-width: 38rem) {
         #outline { display: none !important; }
       }
     </style>
   </head>
   <body>
-    <div id="history" aria-label="Document navigation">
-      <button type="button" data-history="back" aria-label="Back" disabled>←</button>
-      <button type="button" data-history="forward" aria-label="Forward" disabled>→</button>
-      <button type="button" data-open="file" aria-label="Open File" title="Open File"><span class="toolbar-icon" aria-hidden="true">▱</span><span class="toolbar-label">Open File</span></button>
-      <button type="button" data-open="folder" aria-label="Open Folder" title="Open Folder"><span class="toolbar-icon" aria-hidden="true">▰</span><span class="toolbar-label">Open Folder</span></button>
-      <button type="button" data-copy-source aria-label="Copy Markdown" title="Copy Markdown"><span class="toolbar-icon" aria-hidden="true">⧉</span><span class="toolbar-label">Copy Markdown</span></button>
-      <button type="button" data-copy-rendered aria-label="Copy Rendered" title="Copy Rendered"><span class="toolbar-icon" aria-hidden="true">◈</span><span class="toolbar-label">Copy Rendered</span></button>
-    </div>
     <div id="palette" role="dialog" aria-label="Command palette" hidden>
       <button type="button" data-command="open-file">Open File</button>
       <button type="button" data-command="open-folder">Open Folder</button>
@@ -66,18 +49,7 @@
     <main id="document" class="reader" aria-live="polite" tabindex="0">Loading document…</main>
     <script nonce="mdvr-fixture">
       (() => {
-        let toolbarMode = "show-on-scroll";
         let scrollbarMode = "show-on-scroll";
-        const updateToolbar = (hidden) => {
-          document.documentElement.dataset.toolbarHidden = String(hidden);
-        };
-        window.mdvrSetToolbarIcons = (mode) => {
-          document.documentElement.dataset.toolbarIcons = mode;
-        };
-        window.mdvrSetToolbarVisibility = (mode) => {
-          toolbarMode = mode;
-          updateToolbar(mode === "hide");
-        };
         window.mdvrSetScrollbarVisibility = (mode) => {
           scrollbarMode = mode;
           document.documentElement.dataset.scrollbar = mode;
@@ -86,7 +58,6 @@
         document.addEventListener("scroll", () => {
           const top = document.scrollingElement?.scrollTop ?? 0;
           const scrollingDown = top > 12 && top > (window.mdvrToolbarScrollTop ?? 0);
-          updateToolbar(toolbarMode === "show-on-scroll" && scrollingDown);
           if (scrollbarMode === "show-on-scroll") {
             document.documentElement.dataset.scrollbarVisible = scrollingDown ? "false" : "true";
           }
@@ -325,29 +296,7 @@
           return true;
         };
         window.mdvrClearError = () => { status.hidden = true; };
-        window.mdvrSetHistoryAvailability = (back, forward) => {
-          document.querySelector('[data-history="back"]').disabled = !back;
-          document.querySelector('[data-history="forward"]').disabled = !forward;
-        };
         window.mdvrSetThemeChoices = () => {};
-        document.querySelector('#history').addEventListener('click', async (event) => {
-          const button = event.target.closest?.('button');
-          if (!(button instanceof HTMLButtonElement)) return;
-          if (button.hasAttribute('data-copy-source')) {
-            if (await window.mdvrCopySource?.()) postNativeAction({ kind: 'copy', payload: { kind: 'source' } });
-            return;
-          }
-          if (button.hasAttribute('data-copy-rendered')) {
-            if (await window.mdvrCopyRendered?.()) postNativeAction({ kind: 'copy', payload: { kind: 'rendered' } });
-            return;
-          }
-          if (button.dataset.open) {
-            postNativeAction({ kind: 'open', payload: button.dataset.open });
-            return;
-          }
-          postPosition();
-          postNativeAction({ kind: 'history', payload: button.dataset.history });
-        });
         const palette = document.querySelector('#palette');
         const openPalette = () => {
           palette.hidden = false;

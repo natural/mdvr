@@ -58,21 +58,22 @@ test("raw HTML image placeholders remain retryable", () => {
   expect(html).toContain("placeholder.replaceWith(replacement)");
 });
 
-test("narrow layout hides outline and keeps toolbar clear of content", () => {
+test("narrow layout hides outline without reserving renderer toolbar space", () => {
   expect(html).toContain("@media (max-width: 38rem)");
   expect(html).toContain("#outline { display: none !important; }");
-  expect(readerCss).toContain("padding: 7rem 1rem 1rem");
+  expect(readerCss).toContain("padding: 2rem 1rem 1rem");
 });
 
 test("scrollbar visibility supports hide, show, and scroll modes", () => {
   expect(html).toContain("window.mdvrSetScrollbarVisibility");
-  expect(html).toContain('mode === "hide"');
+  expect(html).toContain("dataset.scrollbar = mode");
   expect(html).toContain('"show-on-scroll"');
 });
 
-test("toolbar visibility remains renderer-controlled", () => {
-  expect(html).toContain("window.mdvrSetToolbarVisibility");
-  expect(html).toContain('data-toolbar-hidden="true"');
+test("renderer contains no titlebar toolbar", () => {
+  expect(html).not.toContain('id="history"');
+  expect(html).not.toContain("window.mdvrSetToolbarVisibility");
+  expect(html).not.toContain("window.mdvrSetToolbarIcons");
 });
 
 test("Zed font settings map to safe reader variables", () => {
@@ -123,15 +124,15 @@ test("window chrome and app shortcuts stay native-owned", () => {
   );
 });
 
-test("open controls request native file and folder pickers", () => {
-  expect(html).toContain('data-open="file"');
-  expect(html).toContain('data-open="folder"');
+test("command palette can request native file and folder pickers", () => {
+  expect(html).toContain('data-command="open-file"');
+  expect(html).toContain('data-command="open-folder"');
   expect(html).toContain("kind: 'open'");
   expect(html).not.toContain("event.key.toLowerCase() === 'o'");
 });
 
-test("history controls and shortcuts stay native-owned", () => {
-  expect(html).toContain('aria-label="Document navigation"');
+test("history keyboard shortcuts remain document-local", () => {
+  expect(html).not.toContain('aria-label="Document navigation"');
   expect(html).toContain("kind: 'history'");
   expect(html).toContain("['[', ']', 'r'].includes(event.key.toLowerCase())");
   expect(html).not.toContain("history.back");
@@ -180,7 +181,7 @@ test("outline generation stays safe without a Contents control", () => {
 });
 
 test("source copy uses exact Markdown and restores focus selection", () => {
-  expect(html).toContain("data-copy-source");
+  expect(html).toContain('data-command="copy-source"');
   expect(main).toContain("return copyText(current?.source");
   expect(main).toContain("selection.getRangeAt(index).cloneRange()");
   expect(main).toContain("active?.focus()");
@@ -188,7 +189,7 @@ test("source copy uses exact Markdown and restores focus selection", () => {
 
 test("rendered copy excludes controls and select-all targets document only", () => {
   expect(main).toContain('block.text).join("\\n\\n")');
-  expect(html).toContain("data-copy-rendered");
+  expect(html).toContain('data-command="copy-rendered"');
   expect(html).toContain(
     "range.selectNodeContents(document.querySelector('#document'))",
   );

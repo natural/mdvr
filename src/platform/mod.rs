@@ -25,7 +25,7 @@ use crate::{
         MAX_FRAME_BYTES, Message, ResourceResult, decode, encode,
     },
     platform::bridge::{BridgeContext, BridgeMessage, BridgeRouter},
-    preferences::{ScrollbarVisibility, ToolbarIcons},
+    preferences::ScrollbarVisibility,
     theme::ZedFonts,
 };
 use cocoa::{
@@ -105,6 +105,42 @@ fn content_type(path: &str) -> &'static str {
 
 fn canonical_bridge_message(bytes: &[u8]) -> Result<Vec<u8>, ContractError> {
     encode(&decode(bytes)?)
+}
+
+pub(crate) fn set_window_background_draggable(window: &Window, draggable: bool) {
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return;
+    };
+    unsafe {
+        let view = handle.ns_view.as_ptr() as id;
+        let native_window: id = msg_send![view, window];
+        if native_window != nil {
+            let _: () = msg_send![native_window, setMovableByWindowBackground: draggable];
+        }
+    }
+}
+
+pub(crate) fn begin_window_drag(window: &Window) {
+    if !main_thread() {
+        return;
+    }
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return;
+    };
+    unsafe {
+        let view = handle.ns_view.as_ptr() as id;
+        let native_window: id = msg_send![view, window];
+        let event: id = msg_send![cocoa::appkit::NSApp(), currentEvent];
+        if native_window != nil && event != nil {
+            let _: () = msg_send![native_window, performWindowDragWithEvent: event];
+        }
+    }
 }
 
 pub(crate) fn set_window_appearance(window: &Window, dark: Option<bool>) {
@@ -320,12 +356,9 @@ struct PendingPage {
     appearance: Option<PendingAppearance>,
     context: Option<PendingContext>,
     theme_choices: Option<String>,
-    history: Option<String>,
     locator: Option<PendingLocator>,
     fonts: Option<String>,
-    toolbar: Option<String>,
     scrollbar: Option<String>,
-    toolbar_icons: Option<String>,
 }
 
 #[derive(Default)]
@@ -337,12 +370,9 @@ struct PendingPageState {
     appearance: Option<PendingAppearance>,
     context: Option<PendingContext>,
     theme_choices: Option<String>,
-    history: Option<String>,
     locator: Option<PendingLocator>,
     fonts: Option<String>,
-    toolbar: Option<String>,
     scrollbar: Option<String>,
-    toolbar_icons: Option<String>,
 }
 
 impl PendingPageState {
@@ -354,12 +384,9 @@ impl PendingPageState {
         self.appearance = None;
         self.context = None;
         self.theme_choices = None;
-        self.history = None;
         self.locator = None;
         self.fonts = None;
-        self.toolbar = None;
         self.scrollbar = None;
-        self.toolbar_icons = None;
     }
 
     fn page_ready(&self) -> bool {
@@ -461,12 +488,9 @@ impl PendingPageState {
             appearance: self.appearance.take(),
             context: self.context.take(),
             theme_choices: self.theme_choices.take(),
-            history: self.history.take(),
             locator: self.locator.take(),
             fonts: self.fonts.take(),
-            toolbar: self.toolbar.take(),
             scrollbar: self.scrollbar.take(),
-            toolbar_icons: self.toolbar_icons.take(),
         }
     }
 
@@ -482,19 +506,10 @@ impl PendingPageState {
         if let Some(script) = pending.theme_choices {
             evaluate_javascript(web_view, &script);
         }
-        if let Some(script) = pending.history {
-            evaluate_javascript(web_view, &script);
-        }
         if let Some(script) = pending.fonts {
             evaluate_javascript(web_view, &script);
         }
-        if let Some(script) = pending.toolbar {
-            evaluate_javascript(web_view, &script);
-        }
         if let Some(script) = pending.scrollbar {
-            evaluate_javascript(web_view, &script);
-        }
-        if let Some(script) = pending.toolbar_icons {
             evaluate_javascript(web_view, &script);
         }
         if let Some(appearance) = pending.appearance {
@@ -613,14 +628,6 @@ fn locator_script(locator: &Locator) -> Result<String, serde_json::Error> {
     ))
 }
 
-fn toolbar_script(visibility: ScrollbarVisibility) -> &'static str {
-    match visibility {
-        ScrollbarVisibility::Hide => "window.mdvrSetToolbarVisibility('hide');",
-        ScrollbarVisibility::Show => "window.mdvrSetToolbarVisibility('show');",
-        ScrollbarVisibility::ShowOnScroll => "window.mdvrSetToolbarVisibility('show-on-scroll');",
-    }
-}
-
 fn fonts_script(fonts: &ZedFonts) -> Result<String, serde_json::Error> {
     Ok(format!(
         "window.mdvrSetFonts({},{},{},{});",
@@ -654,18 +661,22 @@ impl EmbeddedWebView {
             .map_or_else(|_| Vec::new(), |mut router| router.drain())
     }
 
-    pub fn sync_frame(&self) {
+    pub fn sync_frame(&self, top_inset: f64) {
         assert!(main_thread(), "Wry WebView must be used on main thread");
         unsafe {
             let bounds = NSView::bounds(self.parent);
             let _ = self.view.set_bounds(Rect {
-                position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
-                size: wry::dpi::LogicalSize::new(bounds.size.width, bounds.size.height).into(),
+                position: wry::dpi::LogicalPosition::new(0.0, top_inset).into(),
+                size: wry::dpi::LogicalSize::new(
+                    bounds.size.width,
+                    (bounds.size.height - top_inset).max(0.0),
+                )
+                .into(),
             });
         }
     }
 
-    pub fn attach(window: &Window) -> Option<Self> {
+    pub fn attach(window: &Window, top_inset: f64) -> Option<Self> {
         if !main_thread() {
             return None;
         }
@@ -712,10 +723,10 @@ impl EmbeddedWebView {
             .with_navigation_handler(navigation_allowed_url)
             .with_url("mdvr://localhost/index.html")
             .with_bounds(Rect {
-                position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
+                position: wry::dpi::LogicalPosition::new(0.0, top_inset).into(),
                 size: wry::dpi::LogicalSize::new(
                     initial_bounds.size.width,
-                    initial_bounds.size.height,
+                    (initial_bounds.size.height - top_inset).max(0.0),
                 )
                 .into(),
             })
@@ -804,6 +815,16 @@ impl EmbeddedWebView {
         Ok(())
     }
 
+    pub fn copy_source(&self) {
+        assert!(main_thread(), "Wry WebView must be used on main thread");
+        evaluate_javascript(&self.view, "void window.mdvrCopySource?.();");
+    }
+
+    pub fn copy_rendered(&self) {
+        assert!(main_thread(), "Wry WebView must be used on main thread");
+        evaluate_javascript(&self.view, "void window.mdvrCopyRendered?.();");
+    }
+
     pub fn clear_error(&self) {
         assert!(main_thread(), "Wry WebView must be used on main thread");
         if self.pending_state.page_ready() {
@@ -846,16 +867,6 @@ impl EmbeddedWebView {
         }
     }
 
-    pub fn set_history_availability(&mut self, back: bool, forward: bool) {
-        assert!(main_thread(), "Wry WebView must be used on main thread");
-        let script = format!("window.mdvrSetHistoryAvailability({back}, {forward});");
-        if self.pending_state.page_ready() {
-            evaluate_javascript(&self.view, &script);
-        } else {
-            self.pending_state.history = Some(script);
-        }
-    }
-
     pub fn set_scrollbar_visibility(&mut self, visibility: ScrollbarVisibility) {
         assert!(main_thread(), "Wry WebView must be used on main thread");
         let script = match visibility {
@@ -869,31 +880,6 @@ impl EmbeddedWebView {
             evaluate_javascript(&self.view, script);
         } else {
             self.pending_state.scrollbar = Some(script.to_owned());
-        }
-    }
-
-    pub fn set_toolbar_icons(&mut self, icons: ToolbarIcons) {
-        assert!(main_thread(), "Wry WebView must be used on main thread");
-        let mode = match icons {
-            ToolbarIcons::Icon => "icon",
-            ToolbarIcons::IconAndText => "icon-and-text",
-            ToolbarIcons::TextOnly => "text-only",
-        };
-        let script = format!("window.mdvrSetToolbarIcons('{mode}');");
-        if self.pending_state.page_ready() {
-            evaluate_javascript(&self.view, &script);
-        } else {
-            self.pending_state.toolbar_icons = Some(script);
-        }
-    }
-
-    pub fn set_toolbar_visibility(&mut self, visibility: ScrollbarVisibility) {
-        assert!(main_thread(), "Wry WebView must be used on main thread");
-        let script = toolbar_script(visibility).to_owned();
-        if self.pending_state.page_ready() {
-            evaluate_javascript(&self.view, &script);
-        } else {
-            self.pending_state.toolbar = Some(script);
         }
     }
 
@@ -1001,12 +987,10 @@ mod tests {
             fallback: crate::contracts::LocatorFallback::NearestHeading,
         };
         assert!(state.replace_locator(locator.clone(), second));
-        state.history = Some("history".into());
         assert!(!state.page_ready());
         let pending = state.take_pending();
         assert_eq!(pending.source.unwrap().source, "new");
         assert_eq!(pending.locator.unwrap().locator, locator);
-        assert_eq!(pending.history.as_deref(), Some("history"));
         assert!(state.page_ready());
         assert_eq!(state.take_pending(), PendingPage::default());
         assert!(!state.replace_source("duplicate".into(), second));
