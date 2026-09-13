@@ -1964,7 +1964,11 @@ fn open_mdvr_window(cx: &mut App, launch: LaunchPlan, announce: bool) {
     match cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
-            titlebar: None,
+            titlebar: Some(gpui::TitlebarOptions {
+                title: Some("mdvr".into()),
+                appears_transparent: true,
+                traffic_light_position: None,
+            }),
             is_resizable: true,
             ..WindowOptions::default()
         },

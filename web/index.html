@@ -8,7 +8,7 @@
     <style nonce="mdvr-fixture">
       :root { color-scheme: light dark; font: 16px/1.6 system-ui, sans-serif; scrollbar-gutter: stable; scrollbar-color: transparent transparent; }
       body { margin: 0; background: Canvas; color: CanvasText; }
-      #search { position: fixed; z-index: 2; top: .75rem; right: .75rem; display: flex; gap: .35rem; padding: .45rem; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius: .4rem; background: Canvas; box-shadow: 0 .2rem .8rem #0004; }
+      #search { position: fixed; z-index: 2; top: .2rem; right: .75rem; display: flex; gap: .35rem; padding: .2rem .35rem; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius: .4rem; background: Canvas; box-shadow: 0 .2rem .8rem #0004; }
       #search[hidden] { display: none; }
       [data-toolbar-hidden="true"] #history,
       [data-toolbar-hidden="true"] #theme,
@@ -19,10 +19,10 @@
       [data-scrollbar-visible="true"]::-webkit-scrollbar-thumb { background: color-mix(in srgb, CanvasText 50%, transparent); }
       #search input[type="search"] { width: 16rem; font: inherit; }
       #search button { font: inherit; }
-      #outline-toggle { position: fixed; z-index: 2; left: .75rem; top: .75rem; font: inherit; transition: opacity .15s; }
-      #history { position: fixed; z-index: 2; left: 7rem; top: .75rem; display: flex; gap: .25rem; transition: opacity .15s; }
+      #outline-toggle { position: fixed; z-index: 2; left: 4.5rem; top: .2rem; font: inherit; transition: opacity .15s; }
+      #history { position: fixed; z-index: 2; left: 7rem; top: .2rem; display: flex; gap: .25rem; padding: .2rem .35rem; transition: opacity .15s; }
       #history button { font: inherit; }
-      #theme { position: fixed; z-index: 2; right: 22rem; top: .75rem; font: inherit; transition: opacity .15s; }
+      #theme { position: fixed; z-index: 2; right: 22rem; top: .2rem; font: inherit; transition: opacity .15s; }
       #outline { position: fixed; z-index: 2; left: .75rem; top: 3.5rem; max-width: min(20rem, 45vw); max-height: calc(100vh - 4.25rem); overflow: auto; padding: .75rem; border-radius: .4rem; background: Canvas; box-shadow: 0 .2rem .8rem #0004; }
       #outline[hidden], #outline-toggle[hidden] { display: none; }
       #outline a { display: block; color: inherit; padding: .15rem 0; text-decoration: none; }
