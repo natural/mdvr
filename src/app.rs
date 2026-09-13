@@ -324,6 +324,37 @@ struct MdvrView {
 }
 
 impl MdvrView {
+    fn refresh_preferences(&mut self) {
+        let Some(path) = conventional_path() else {
+            return;
+        };
+        let preferences = load_or_default(&path).preferences;
+        if preferences == self.preferences {
+            return;
+        }
+        self.preferences = preferences;
+        let zed = self
+            .preferences
+            .use_zed_config
+            .then(load_zed_config)
+            .flatten();
+        self.zed_theme = zed.as_ref().and_then(|config| config.theme.clone());
+        self.zed_fonts = zed.map(|config| config.fonts);
+        self.theme_family = self
+            .preferences
+            .theme_file
+            .as_deref()
+            .and_then(|theme_path| import_file(theme_path).ok())
+            .or_else(|| {
+                self.zed_theme.clone().map(|theme| ThemeFamily {
+                    name: "Zed theme".into(),
+                    members: vec![theme],
+                })
+            });
+        self.appearance_mode = None;
+        self.toolbar_visibility = ScrollbarVisibility::ShowOnScroll;
+    }
+
     fn cycle_toolbar_visibility(&mut self) {
         self.toolbar_visibility = match self.toolbar_visibility {
             ScrollbarVisibility::ShowOnScroll => ScrollbarVisibility::Show,
@@ -778,16 +809,15 @@ impl MdvrView {
     }
 
     fn update_appearance(&mut self, window: &Window) {
-        let selected_theme = self
-            .preferences
-            .theme
-            .as_deref()
-            .and_then(|name| {
+        let selected_theme = if self.preferences.theme.is_none() {
+            self.zed_theme.as_ref()
+        } else {
+            self.preferences.theme.as_deref().and_then(|name| {
                 self.theme_family
                     .as_ref()
                     .and_then(|family| family.member(name))
             })
-            .or(self.zed_theme.as_ref());
+        };
         let mode = selected_theme.map_or_else(
             || match self.preferences.theme.as_deref() {
                 Some("light") => AppearanceMode::Light,
@@ -956,13 +986,16 @@ impl MdvrView {
                         match action.action {
                             ActionMessage::Open(crate::contracts::OpenAction::File) => {
                                 if let Some(path) = choose_markdown_file() {
-                                    self.pending_open.push_back(OpenRequest { path, ack: None });
-                                    cx.notify();
+                                    cx.defer(move |app| {
+                                        open_new_window(app, path, LaunchIntent::ExplicitFile);
+                                    });
                                 }
                             }
                             ActionMessage::Open(crate::contracts::OpenAction::Folder) => {
                                 if let Some(path) = choose_directory() {
-                                    self.open_directory(path, cx);
+                                    cx.defer(move |app| {
+                                        open_new_window(app, path, LaunchIntent::ExplicitDirectory);
+                                    });
                                 }
                             }
                             ActionMessage::Open(crate::contracts::OpenAction::Picker) => {
@@ -1512,13 +1545,37 @@ impl Drop for MdvrView {
 
 impl Render for MdvrView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.refresh_preferences();
         self.process_next_open(window, cx);
         if self.initialized {
             self.update_appearance(window);
             self.capture_window_geometry(window);
         }
+        let picker_dark = match self.appearance_mode {
+            Some(AppearanceMode::Dark) => true,
+            Some(AppearanceMode::Light) => false,
+            _ => matches!(
+                window.appearance(),
+                WindowAppearance::Dark | WindowAppearance::VibrantDark
+            ),
+        };
+        let picker_bg = if picker_dark {
+            gpui::rgb(0x202124)
+        } else {
+            gpui::rgb(0xffffff)
+        };
+        let picker_fg = if picker_dark {
+            gpui::rgb(0xf1f3f4)
+        } else {
+            gpui::rgb(0x202124)
+        };
+        let picker_muted = if picker_dark {
+            gpui::rgb(0xb0b3b8)
+        } else {
+            gpui::rgb(0x5f6368)
+        };
         if self.loading_document {
-            return div().size_full().bg(gpui::rgb(0x202124)).into_any_element();
+            return div().size_full().bg(picker_bg).into_any_element();
         }
         if let Some(web_view) = self.web_view.as_ref() {
             web_view.sync_frame();
@@ -1553,8 +1610,8 @@ impl Render for MdvrView {
                 .justify_center()
                 .items_center()
                 .gap_3()
-                .bg(gpui::rgb(0x202124))
-                .text_color(gpui::rgb(0xffffff))
+                .bg(picker_bg)
+                .text_color(picker_fg)
                 .child(format!(
                     "{} is {:.1} MiB",
                     path.display(),
@@ -1590,11 +1647,11 @@ impl Render for MdvrView {
             .flex_col()
             .p_4()
             .gap_2()
-            .bg(gpui::rgb(0x202124))
-            .text_color(gpui::rgb(0xf1f3f4))
+            .bg(picker_bg)
+            .text_color(picker_fg)
             .child(
                 div()
-                    .text_color(gpui::rgb(0xb0b3b8))
+                    .text_color(picker_muted)
                     .child(format!("Filter: {}", self.shell.picker.query())),
             )
             .when_some(self.startup_error.clone(), |view, error| {
@@ -1670,7 +1727,7 @@ impl Render for MdvrView {
                             .cursor_pointer()
                             .hover(|style| style.bg(gpui::rgb(0x303134)))
                             .when(is_selected, |style| style.bg(gpui::rgb(0x3c4043)))
-                            .text_color(gpui::rgb(0xffffff))
+                            .text_color(picker_fg)
                             .child(path.clone())
                             .on_click(cx.listener(move |view, _, window, cx| {
                                 view.open_picker_document(path.clone(), window, cx);
@@ -1748,16 +1805,34 @@ impl PreferencesView {
 }
 
 impl Render for PreferencesView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.preferences.theme.as_deref().unwrap_or("system");
+        let dark = match self.preferences.theme.as_deref() {
+            Some("light") => false,
+            Some("dark") => true,
+            _ => matches!(
+                window.appearance(),
+                WindowAppearance::Dark | WindowAppearance::VibrantDark
+            ),
+        };
+        let background = if dark {
+            gpui::rgb(0x202124)
+        } else {
+            gpui::rgb(0xffffff)
+        };
+        let foreground = if dark {
+            gpui::rgb(0xf1f3f4)
+        } else {
+            gpui::rgb(0x202124)
+        };
         div()
             .size_full()
             .flex()
             .flex_col()
             .gap_3()
             .p_6()
-            .bg(gpui::rgb(0x202124))
-            .text_color(gpui::rgb(0xf1f3f4))
+            .bg(background)
+            .text_color(foreground)
             .child(div().text_xl().child("Preferences"))
             .child(div().child(format!("Theme: {theme}")))
             .child(div().child(format!(
@@ -1892,17 +1967,37 @@ fn active_mdvr_window(cx: &mut App) -> Option<gpui::WindowHandle<MdvrView>> {
         })
 }
 
+fn open_new_window(cx: &mut App, path: PathBuf, intent: LaunchIntent) {
+    let preferences = conventional_path()
+        .map(|path| load_or_default(&path).preferences)
+        .unwrap_or_default();
+    let state = match resolve_launch(intent, Some(path.as_path()), &preferences, false) {
+        Ok(state) => state,
+        Err(error) => {
+            eprintln!("mdvr: cannot open {}: {error}", path.display());
+            return;
+        }
+    };
+    let picker_root = state
+        .browsing_root
+        .clone()
+        .unwrap_or_else(|| path.parent().unwrap_or(path.as_path()).to_owned());
+    open_mdvr_window(
+        cx,
+        LaunchPlan {
+            intent,
+            state,
+            picker_root,
+            explicit: true,
+        },
+        true,
+    );
+}
+
 fn open_file_action(_: &OpenFileAction, cx: &mut App) {
-    let Some(path) = choose_markdown_file() else {
-        return;
-    };
-    let Some(window) = active_mdvr_window(cx) else {
-        return;
-    };
-    let _ = window.update(cx, |view, _, cx| {
-        view.pending_open.push_back(OpenRequest { path, ack: None });
-        cx.notify();
-    });
+    if let Some(path) = choose_markdown_file() {
+        open_new_window(cx, path, LaunchIntent::ExplicitFile);
+    }
 }
 
 fn cycle_toolbar_visibility_action(_: &CycleToolbarVisibility, cx: &mut App) {
@@ -1918,16 +2013,19 @@ fn show_picker_action(_: &ShowPicker, cx: &mut App) {
 }
 
 fn open_folder_action(_: &OpenFolderAction, cx: &mut App) {
-    let Some(path) = choose_directory() else {
-        return;
-    };
-    let Some(window) = active_mdvr_window(cx) else {
-        return;
-    };
-    let _ = window.update(cx, |view, _, cx| view.open_directory(path, cx));
+    if let Some(path) = choose_directory() {
+        open_new_window(cx, path, LaunchIntent::ExplicitDirectory);
+    }
 }
 
 fn show_preferences(_: &ShowPreferences, cx: &mut App) {
+    if cx
+        .windows()
+        .into_iter()
+        .any(|window| window.downcast::<PreferencesView>().is_some())
+    {
+        return;
+    }
     let preferences = conventional_path()
         .map(|path| load_or_default(&path).preferences)
         .unwrap_or_default();
