@@ -24,6 +24,7 @@ actions!(
         OpenFolderAction,
         ShowPreferences,
         ShowPicker,
+        CycleToolbarVisibility,
         QuitApp,
         AboutMdvr
     ]
@@ -53,7 +54,7 @@ use crate::{
         update_bridge_context,
     },
     preferences::{
-        DisplayBounds, LaunchIntent, Preferences, ReadingLocator, ToolbarVisibility,
+        DisplayBounds, LaunchIntent, Preferences, ReadingLocator, ScrollbarVisibility,
         WindowGeometry, conventional_path, load_or_default, resolve_launch, save,
     },
     theme::{
@@ -313,6 +314,7 @@ struct MdvrView {
     loading_document: bool,
     initial_load_task: Option<Task<()>>,
     navigation_load_task: Option<Task<()>>,
+    toolbar_visibility: ScrollbarVisibility,
     render_started: Option<Instant>,
     initialized: bool,
     remote_consent: Option<(crate::contracts::DocumentId, bool)>,
@@ -322,6 +324,17 @@ struct MdvrView {
 }
 
 impl MdvrView {
+    fn cycle_toolbar_visibility(&mut self) {
+        self.toolbar_visibility = match self.toolbar_visibility {
+            ScrollbarVisibility::ShowOnScroll => ScrollbarVisibility::Show,
+            ScrollbarVisibility::Show => ScrollbarVisibility::Hide,
+            ScrollbarVisibility::Hide => ScrollbarVisibility::ShowOnScroll,
+        };
+        if let Some(web_view) = self.web_view.as_mut() {
+            web_view.set_toolbar_visibility(self.toolbar_visibility);
+        }
+    }
+
     fn new(shell: ShellState, navigation: NavigationState, cx: &mut Context<Self>) -> Self {
         let (remote_sender, remote_results) = channel();
         let picker_focus = cx.focus_handle();
@@ -350,6 +363,7 @@ impl MdvrView {
             loading_document: false,
             initial_load_task: None,
             navigation_load_task: None,
+            toolbar_visibility: ScrollbarVisibility::ShowOnScroll,
             render_started: None,
             initialized: false,
             remote_consent: None,
@@ -803,7 +817,8 @@ impl MdvrView {
             if let Some(fonts) = self.zed_fonts.as_ref() {
                 web_view.set_fonts(fonts);
             }
-            web_view.set_toolbar_visibility(self.preferences.toolbar_visibility);
+            web_view.set_scrollbar_visibility(self.preferences.scrollbar_visibility);
+            web_view.set_toolbar_visibility(self.toolbar_visibility);
         }
         if self.appearance_mode == Some(mode) {
             return;
@@ -1695,15 +1710,6 @@ impl PreferencesView {
         self.save();
     }
 
-    fn cycle_toolbar_visibility(&mut self) {
-        self.preferences.toolbar_visibility = match self.preferences.toolbar_visibility {
-            ToolbarVisibility::ShowOnScroll => ToolbarVisibility::Show,
-            ToolbarVisibility::Show => ToolbarVisibility::Hide,
-            ToolbarVisibility::Hide => ToolbarVisibility::ShowOnScroll,
-        };
-        self.save();
-    }
-
     fn toggle_zed_config(&mut self) {
         self.preferences.use_zed_config = !self.preferences.use_zed_config;
         self.save();
@@ -1733,11 +1739,11 @@ impl Render for PreferencesView {
             .child(div().text_xl().child("Preferences"))
             .child(div().child(format!("Theme: {theme}")))
             .child(div().child(format!(
-                "Toolbar: {}",
-                match self.preferences.toolbar_visibility {
-                    ToolbarVisibility::Hide => "Hidden",
-                    ToolbarVisibility::Show => "Always shown",
-                    ToolbarVisibility::ShowOnScroll => "Show on scroll",
+                "Scrollbar: {}",
+                match self.preferences.scrollbar_visibility {
+                    ScrollbarVisibility::Hide => "Hidden",
+                    ScrollbarVisibility::Show => "Always shown",
+                    ScrollbarVisibility::ShowOnScroll => "Show on scroll",
                 }
             )))
             .child(
@@ -1748,8 +1754,16 @@ impl Render for PreferencesView {
                     .rounded_sm()
                     .cursor_pointer()
                     .bg(gpui::rgb(0x3c4043))
-                    .child("Cycle toolbar visibility")
-                    .on_click(cx.listener(|view, _, _, _| view.cycle_toolbar_visibility())),
+                    .child("Cycle scrollbar visibility")
+                    .on_click(cx.listener(|view, _, _, _| {
+                        view.preferences.scrollbar_visibility =
+                            match view.preferences.scrollbar_visibility {
+                                ScrollbarVisibility::ShowOnScroll => ScrollbarVisibility::Show,
+                                ScrollbarVisibility::Show => ScrollbarVisibility::Hide,
+                                ScrollbarVisibility::Hide => ScrollbarVisibility::ShowOnScroll,
+                            };
+                        view.save();
+                    })),
             )
             .child(
                 div()
@@ -1841,6 +1855,12 @@ fn open_file_action(_: &OpenFileAction, cx: &mut App) {
         view.pending_open.push_back(OpenRequest { path, ack: None });
         cx.notify();
     });
+}
+
+fn cycle_toolbar_visibility_action(_: &CycleToolbarVisibility, cx: &mut App) {
+    if let Some(window) = active_mdvr_window(cx) {
+        let _ = window.update(cx, |view, _, _| view.cycle_toolbar_visibility());
+    }
 }
 
 fn show_picker_action(_: &ShowPicker, cx: &mut App) {
@@ -1993,6 +2013,7 @@ pub fn run(launch: LaunchPlan) {
         cx.on_action(open_file_action);
         cx.on_action(open_folder_action);
         cx.on_action(show_picker_action);
+        cx.on_action(cycle_toolbar_visibility_action);
         cx.on_action(show_preferences);
         cx.on_action(quit_app);
         cx.on_action(about_mdvr);
@@ -2000,6 +2021,7 @@ pub fn run(launch: LaunchPlan) {
             gpui::KeyBinding::new("cmd-o", OpenFileAction, None),
             gpui::KeyBinding::new("cmd-shift-o", OpenFolderAction, None),
             gpui::KeyBinding::new("cmd-p", ShowPicker, None),
+            gpui::KeyBinding::new("cmd-shift-b", CycleToolbarVisibility, None),
             gpui::KeyBinding::new("cmd-,", ShowPreferences, None),
             gpui::KeyBinding::new("cmd-q", QuitApp, None),
         ]);
@@ -2021,6 +2043,7 @@ pub fn run(launch: LaunchPlan) {
                     MenuItem::action("Open Folder…", OpenFolderAction),
                     MenuItem::separator(),
                     MenuItem::action("Browse Files", ShowPicker),
+                    MenuItem::action("Cycle Toolbar Visibility", CycleToolbarVisibility),
                 ],
             },
         ]);

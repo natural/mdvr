@@ -26,7 +26,7 @@ use crate::{
         MAX_FRAME_BYTES, Message, ResourceResult, decode, encode,
     },
     platform::bridge::{BridgeContext, BridgeMessage, BridgeRouter},
-    preferences::ToolbarVisibility,
+    preferences::ScrollbarVisibility,
     theme::ZedFonts,
 };
 use cocoa::{
@@ -366,6 +366,7 @@ struct PendingPage {
     locator: Option<PendingLocator>,
     fonts: Option<String>,
     toolbar: Option<String>,
+    scrollbar: Option<String>,
 }
 
 #[derive(Default)]
@@ -381,6 +382,7 @@ struct PendingPageState {
     locator: Option<PendingLocator>,
     fonts: Option<String>,
     toolbar: Option<String>,
+    scrollbar: Option<String>,
 }
 
 impl PendingPageState {
@@ -396,6 +398,7 @@ impl PendingPageState {
         self.locator = None;
         self.fonts = None;
         self.toolbar = None;
+        self.scrollbar = None;
     }
 
     fn page_ready(&self) -> bool {
@@ -501,6 +504,7 @@ impl PendingPageState {
             locator: self.locator.take(),
             fonts: self.fonts.take(),
             toolbar: self.toolbar.take(),
+            scrollbar: self.scrollbar.take(),
         }
     }
 
@@ -523,6 +527,9 @@ impl PendingPageState {
             evaluate_javascript(web_view, &script);
         }
         if let Some(script) = pending.toolbar {
+            evaluate_javascript(web_view, &script);
+        }
+        if let Some(script) = pending.scrollbar {
             evaluate_javascript(web_view, &script);
         }
         if let Some(appearance) = pending.appearance {
@@ -640,11 +647,11 @@ fn locator_script(locator: &Locator) -> Result<String, serde_json::Error> {
     ))
 }
 
-fn toolbar_script(visibility: ToolbarVisibility) -> &'static str {
+fn toolbar_script(visibility: ScrollbarVisibility) -> &'static str {
     match visibility {
-        ToolbarVisibility::Hide => "window.mdvrSetToolbarVisibility('hide');",
-        ToolbarVisibility::Show => "window.mdvrSetToolbarVisibility('show');",
-        ToolbarVisibility::ShowOnScroll => "window.mdvrSetToolbarVisibility('show-on-scroll');",
+        ScrollbarVisibility::Hide => "window.mdvrSetToolbarVisibility('hide');",
+        ScrollbarVisibility::Show => "window.mdvrSetToolbarVisibility('show');",
+        ScrollbarVisibility::ShowOnScroll => "window.mdvrSetToolbarVisibility('show-on-scroll');",
     }
 }
 
@@ -871,7 +878,23 @@ impl EmbeddedWebView {
         }
     }
 
-    pub fn set_toolbar_visibility(&mut self, visibility: ToolbarVisibility) {
+    pub fn set_scrollbar_visibility(&mut self, visibility: ScrollbarVisibility) {
+        assert!(main_thread(), "Wry WebView must be used on main thread");
+        let script = match visibility {
+            ScrollbarVisibility::Hide => "window.mdvrSetScrollbarVisibility('hide');",
+            ScrollbarVisibility::Show => "window.mdvrSetScrollbarVisibility('show');",
+            ScrollbarVisibility::ShowOnScroll => {
+                "window.mdvrSetScrollbarVisibility('show-on-scroll');"
+            }
+        };
+        if self.pending_state.page_ready() {
+            evaluate_javascript(&self.view, script);
+        } else {
+            self.pending_state.scrollbar = Some(script.to_owned());
+        }
+    }
+
+    pub fn set_toolbar_visibility(&mut self, visibility: ScrollbarVisibility) {
         assert!(main_thread(), "Wry WebView must be used on main thread");
         let script = toolbar_script(visibility).to_owned();
         if self.pending_state.page_ready() {
