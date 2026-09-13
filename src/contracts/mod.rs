@@ -491,14 +491,6 @@ pub enum ActionMessage {
     Theme(ThemeAction),
     #[serde(rename = "open")]
     Open(OpenAction),
-    #[serde(rename = "window")]
-    Window(WindowAction),
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WindowAction {
-    BeginDrag,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

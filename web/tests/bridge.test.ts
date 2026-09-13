@@ -107,10 +107,19 @@ test("images use context-bound native resource requests", () => {
 
 test("command palette is keyboard accessible and authority-free", () => {
   expect(html).toContain('aria-label="Command palette"');
-  expect(html).toContain("if (event.shiftKey) openPalette()");
+  expect(html).toContain("event.metaKey && event.shiftKey");
   expect(html).toContain("palette.querySelector('button').focus()");
   expect(html).toContain(
     "postNativeAction({ kind: 'focus', payload: 'renderer' })",
+  );
+});
+
+test("window chrome and app shortcuts stay native-owned", () => {
+  expect(html).not.toContain("begin_drag");
+  expect(html).not.toContain("addEventListener('pointerdown'");
+  expect(html).not.toContain("event.key.toLowerCase() === 'o'");
+  expect(html).not.toContain(
+    "event.metaKey && event.key.toLowerCase() === 'p'",
   );
 });
 
@@ -118,7 +127,7 @@ test("open controls request native file and folder pickers", () => {
   expect(html).toContain('data-open="file"');
   expect(html).toContain('data-open="folder"');
   expect(html).toContain("kind: 'open'");
-  expect(html).toContain("event.shiftKey ? 'folder' : 'file'");
+  expect(html).not.toContain("event.key.toLowerCase() === 'o'");
 });
 
 test("history controls and shortcuts stay native-owned", () => {

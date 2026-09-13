@@ -399,6 +399,23 @@ mod tests {
     }
 
     #[test]
+    fn routers_isolate_messages_between_windows() {
+        let mut first = BridgeRouter::new(BridgeContext::default());
+        let mut second = BridgeRouter::new(BridgeContext::default());
+        first
+            .accept(&bytes(1, None, ActionMessage::Search(SearchAction::Next)))
+            .unwrap();
+        second
+            .accept(&bytes(2, None, ActionMessage::Copy(CopyAction::Code)))
+            .unwrap();
+
+        assert_eq!(first.drain_actions()[0].request.get(), 1);
+        assert_eq!(second.drain_actions()[0].request.get(), 2);
+        assert!(first.drain_actions().is_empty());
+        assert!(second.drain_actions().is_empty());
+    }
+
+    #[test]
     fn context_changes_do_not_authorize_queued_actions() {
         let current = BridgeContext {
             document: Some(DocumentId::new(7).unwrap()),

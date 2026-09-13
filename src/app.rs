@@ -8,13 +8,13 @@ use std::{
         atomic::AtomicBool,
         mpsc::{Receiver, Sender, channel},
     },
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, Instant},
 };
 
 use gpui::{
-    App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Menu, MenuItem, Render,
-    SystemMenuType, Task, Timer, Window, WindowAppearance, WindowBounds, WindowControlArea,
-    WindowOptions, actions, div, point, prelude::*, px, size,
+    App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Menu, MenuItem,
+    PathPromptOptions, Render, Subscription, SystemMenuType, Task, Timer, Window, WindowAppearance,
+    WindowBounds, WindowOptions, actions, div, point, prelude::*, px, size,
 };
 
 actions!(
@@ -36,7 +36,7 @@ use crate::{
     contracts::{
         ActionMessage, ActionMessageEnvelope, ErrorCode, Generation, LocatorFallback,
         NavigationRequest, NavigationTarget, ResourceKind, ResourceReference, ResourceRequest,
-        ResourceResult, ResourceResultValue, RootId, ScanId, SearchAction, WindowAction,
+        ResourceResult, ResourceResultValue, RootId, ScanId, SearchAction,
     },
     files::{
         DiscoveryEvent, DiscoveryScanner, LARGE_SOURCE_CONFIRM_BYTES, LoadError, LoadedSource,
@@ -46,13 +46,12 @@ use crate::{
     platform::{
         EmbeddedWebView,
         bridge::{BridgeContext, BridgeMessage},
-        choose_directory, choose_json_file, choose_markdown_file, confirm_large_document,
-        confirm_outside_resource, confirm_remote_images, drain_bridge_messages, file_url_path,
+        confirm_large_document, confirm_outside_resource, confirm_remote_images, file_url_path,
         open_external_url, open_local_file,
         remote_fetch::fetch_image,
         remote_policy::{RemoteLimits, RemotePolicy},
         resource_policy::{ResourceAuthorization, ResourceDenied, ResourcePolicy},
-        update_bridge_context,
+        set_window_appearance,
     },
     preferences::{
         DisplayBounds, LaunchIntent, Preferences, ReadingLocator, ScrollbarVisibility,
@@ -283,15 +282,51 @@ fn dispatch_bridge_action(
             crate::contracts::TextScaleAction::Decrease => ShellCommand::DecreaseTextSize,
             crate::contracts::TextScaleAction::Reset => ShellCommand::ResetTextSize,
         }),
-        ActionMessage::History(_)
-        | ActionMessage::Theme(_)
-        | ActionMessage::Open(_)
-        | ActionMessage::Window(_) => {}
+        ActionMessage::History(_) | ActionMessage::Theme(_) | ActionMessage::Open(_) => {}
         ActionMessage::CapturePosition(_) | ActionMessage::RestorePosition(_) => {
             unreachable!("router filters bridge actions")
         }
     }
     Ok(())
+}
+
+#[derive(Clone)]
+struct SharedPreferences {
+    preferences: Preferences,
+    theme_family: ThemeFamily,
+    zed_theme: Option<Theme>,
+    zed_fonts: Option<ZedFonts>,
+}
+
+impl SharedPreferences {
+    fn new(preferences: Preferences) -> Self {
+        let zed = preferences.use_zed_config.then(load_zed_config).flatten();
+        let zed_theme = zed.as_ref().and_then(|config| config.theme.clone());
+        let zed_fonts = zed.map(|config| config.fonts);
+        let theme_family = preferences
+            .theme_file
+            .as_deref()
+            .and_then(|path| import_file(path).ok())
+            .unwrap_or_else(default_family);
+        Self {
+            preferences,
+            theme_family,
+            zed_theme,
+            zed_fonts,
+        }
+    }
+}
+
+impl gpui::Global for SharedPreferences {}
+
+fn publish_preferences(cx: &mut App, preferences: &Preferences) {
+    let shared = SharedPreferences::new(preferences.clone());
+    cx.update_global::<SharedPreferences, _>(|state, _| *state = shared);
+    if let Some(path) = conventional_path()
+        && let Err(error) = save(&path, preferences)
+    {
+        eprintln!("mdvr: cannot save preferences: {error}");
+    }
 }
 
 struct MdvrView {
@@ -305,6 +340,8 @@ struct MdvrView {
     bridge_task: Option<Task<()>>,
     resource_policy: Option<ResourcePolicy>,
     preferences: Preferences,
+    #[allow(dead_code)]
+    preferences_subscription: Subscription,
     appearance_mode: Option<AppearanceMode>,
     picker_focus: FocusHandle,
     pending_open: VecDeque<OpenRequest>,
@@ -320,7 +357,6 @@ struct MdvrView {
     initial_load_task: Option<Task<()>>,
     navigation_load_task: Option<Task<()>>,
     toolbar_visibility: ScrollbarVisibility,
-    preferences_stamp: Option<SystemTime>,
     render_started: Option<Instant>,
     initialized: bool,
     remote_consent: Option<(crate::contracts::DocumentId, bool)>,
@@ -330,39 +366,6 @@ struct MdvrView {
 }
 
 impl MdvrView {
-    fn refresh_preferences(&mut self) {
-        let Some(path) = conventional_path() else {
-            return;
-        };
-        let stamp = fs::metadata(&path)
-            .ok()
-            .and_then(|metadata| metadata.modified().ok());
-        if stamp == self.preferences_stamp && self.initialized {
-            return;
-        }
-        self.preferences_stamp = stamp;
-        let preferences = load_or_default(&path).preferences;
-        if preferences == self.preferences {
-            return;
-        }
-        self.preferences = preferences;
-        let zed = self
-            .preferences
-            .use_zed_config
-            .then(load_zed_config)
-            .flatten();
-        self.zed_theme = zed.as_ref().and_then(|config| config.theme.clone());
-        self.zed_fonts = zed.map(|config| config.fonts);
-        self.theme_family = self
-            .preferences
-            .theme_file
-            .as_deref()
-            .and_then(|theme_path| import_file(theme_path).ok())
-            .or_else(|| Some(default_family()));
-        self.appearance_mode = None;
-        self.toolbar_visibility = ScrollbarVisibility::ShowOnScroll;
-    }
-
     fn cycle_toolbar_visibility(&mut self) {
         self.toolbar_visibility = match self.toolbar_visibility {
             ScrollbarVisibility::ShowOnScroll => ScrollbarVisibility::Show,
@@ -377,6 +380,17 @@ impl MdvrView {
     fn new(shell: ShellState, navigation: NavigationState, cx: &mut Context<Self>) -> Self {
         let (remote_sender, remote_results) = channel();
         let picker_focus = cx.focus_handle();
+        let preferences_subscription = cx.observe_global::<SharedPreferences>(|view, cx| {
+            let shared = cx.global::<SharedPreferences>().clone();
+            if shared.preferences != view.preferences {
+                view.preferences = shared.preferences;
+                view.theme_family = Some(shared.theme_family);
+                view.zed_theme = shared.zed_theme;
+                view.zed_fonts = shared.zed_fonts;
+                view.appearance_mode = None;
+                cx.notify();
+            }
+        });
         let mut view = Self {
             shell,
             navigation,
@@ -387,7 +401,8 @@ impl MdvrView {
             discovery_task: None,
             bridge_task: None,
             resource_policy: None,
-            preferences: Preferences::default(),
+            preferences: cx.global::<SharedPreferences>().preferences.clone(),
+            preferences_subscription,
             appearance_mode: None,
             picker_focus,
             pending_open: VecDeque::new(),
@@ -403,7 +418,6 @@ impl MdvrView {
             initial_load_task: None,
             navigation_load_task: None,
             toolbar_visibility: ScrollbarVisibility::ShowOnScroll,
-            preferences_stamp: None,
             render_started: None,
             initialized: false,
             remote_consent: None,
@@ -447,28 +461,14 @@ impl MdvrView {
                 }
             }
         }));
-        self.preferences = conventional_path()
-            .map(|path| load_or_default(&path).preferences)
-            .unwrap_or_default();
-        self.preferences_stamp = conventional_path()
-            .and_then(|path| fs::metadata(path).ok())
-            .and_then(|metadata| metadata.modified().ok());
+        let shared = cx.global::<SharedPreferences>().clone();
+        self.preferences = shared.preferences;
+        self.theme_family = Some(shared.theme_family);
+        self.zed_theme = shared.zed_theme;
+        self.zed_fonts = shared.zed_fonts;
         self.initialized = true;
         self.shell.text_scale_percent = self.preferences.text_scale_percent;
         self.pending_initial_locator = launch.state.reading_locator.clone();
-        let zed = self
-            .preferences
-            .use_zed_config
-            .then(load_zed_config)
-            .flatten();
-        self.zed_theme = zed.as_ref().and_then(|config| config.theme.clone());
-        self.zed_fonts = zed.map(|config| config.fonts);
-        self.theme_family = self
-            .preferences
-            .theme_file
-            .as_deref()
-            .and_then(|path| import_file(path).ok())
-            .or_else(|| Some(default_family()));
         if let Some(path) = missing_dock_document(launch, &self.preferences) {
             self.failed_path = Some(path.clone());
             self.report_error(format!(
@@ -570,17 +570,6 @@ impl MdvrView {
     fn handle_picker_key(&mut self, event: &KeyDownEvent, window: &Window, cx: &mut Context<Self>) {
         if event.keystroke.modifiers.platform {
             match event.keystroke.key.as_str() {
-                "o" if event.keystroke.modifiers.shift => {
-                    if let Some(path) = choose_directory() {
-                        self.open_directory(path, cx);
-                    }
-                }
-                "o" => {
-                    if let Some(path) = choose_markdown_file() {
-                        self.pending_open.push_back(OpenRequest { path, ack: None });
-                        cx.notify();
-                    }
-                }
                 "p" if self.picker_return && !event.keystroke.modifiers.shift => {
                     self.restore_current_document(window, cx)
                 }
@@ -772,7 +761,6 @@ impl MdvrView {
         }
         self.bridge_context = context;
         self.render_started = context.document.map(|_| Instant::now());
-        update_bridge_context(context);
         self.resource_policy = self
             .shell
             .root
@@ -796,23 +784,78 @@ impl MdvrView {
         }
     }
 
-    fn import_theme(&mut self) {
-        let Some(path) = choose_json_file() else {
-            return;
-        };
-        match import_file(&path) {
-            Ok(family) => {
-                let Some(theme) = family.members.first() else {
-                    return;
-                };
-                self.preferences.theme = Some(theme.name.clone());
-                self.preferences.theme_file = Some(path);
-                self.theme_family = Some(family);
-                self.appearance_mode = None;
-                self.save_preferences();
-            }
-            Err(error) => self.report_error(format!("Theme import failed: {error}")),
-        }
+    fn prompt_for_picker_document(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Open Markdown".into()),
+        });
+        cx.spawn(async move |view, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let _ = view.update(cx, |view, cx| {
+                view.pending_open.push_back(OpenRequest { path, ack: None });
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_for_picker_directory(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Open Folder".into()),
+        });
+        cx.spawn(async move |view, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let _ = view.update(cx, |view, cx| view.open_directory(path, cx));
+        })
+        .detach();
+    }
+
+    fn import_theme(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Import Theme".into()),
+        });
+        cx.spawn(async move |view, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let _ = view.update(cx, |view, cx| match import_file(&path) {
+                Ok(family) => {
+                    let Some(theme) = family.members.first() else {
+                        return;
+                    };
+                    view.preferences.theme = Some(theme.name.clone());
+                    view.preferences.theme_file = Some(path);
+                    view.theme_family = Some(family);
+                    view.appearance_mode = None;
+                    view.save_preferences();
+                    publish_preferences(cx, &view.preferences);
+                    cx.notify();
+                }
+                Err(error) => view.report_error(format!("Theme import failed: {error}")),
+            });
+        })
+        .detach();
     }
 
     fn update_appearance(&mut self, window: &Window) {
@@ -841,6 +884,11 @@ impl MdvrView {
         if self.appearance_mode == Some(mode) {
             return;
         }
+        set_window_appearance(
+            window,
+            (self.preferences.theme.is_some() || self.zed_theme.is_some())
+                .then_some(mode == AppearanceMode::Dark),
+        );
         let Some(generation) = self.bridge_context.generation else {
             return;
         };
@@ -946,7 +994,11 @@ impl MdvrView {
                 self.deliver_resource_result(result);
             }
         }
-        for message in drain_bridge_messages() {
+        let messages = self
+            .web_view
+            .as_ref()
+            .map_or_else(Vec::new, EmbeddedWebView::drain_bridge_messages);
+        for message in messages {
             match message {
                 BridgeMessage::Action(action) => {
                     let focus_renderer = matches!(
@@ -959,6 +1011,7 @@ impl MdvrView {
                             self.preferences.text_scale_percent = self.shell.text_scale_percent;
                             self.appearance_mode = None;
                             self.save_preferences();
+                            publish_preferences(cx, &self.preferences);
                             cx.notify();
                         }
                         if let ActionMessage::Theme(theme) = &action.action {
@@ -972,7 +1025,7 @@ impl MdvrView {
                                 crate::contracts::ThemeAction::Dark => {
                                     self.preferences.theme = Some("dark".into())
                                 }
-                                crate::contracts::ThemeAction::Import => self.import_theme(),
+                                crate::contracts::ThemeAction::Import => self.import_theme(cx),
                                 crate::contracts::ThemeAction::Named { name }
                                     if self
                                         .theme_family
@@ -987,23 +1040,16 @@ impl MdvrView {
                             if !matches!(theme, crate::contracts::ThemeAction::Import) {
                                 self.appearance_mode = None;
                                 self.save_preferences();
+                                publish_preferences(cx, &self.preferences);
                             }
                             cx.notify();
                         }
                         match action.action {
                             ActionMessage::Open(crate::contracts::OpenAction::File) => {
-                                if let Some(path) = choose_markdown_file() {
-                                    cx.defer(move |app| {
-                                        open_new_window(app, path, LaunchIntent::ExplicitFile);
-                                    });
-                                }
+                                cx.defer(prompt_for_document);
                             }
                             ActionMessage::Open(crate::contracts::OpenAction::Folder) => {
-                                if let Some(path) = choose_directory() {
-                                    cx.defer(move |app| {
-                                        open_new_window(app, path, LaunchIntent::ExplicitDirectory);
-                                    });
-                                }
+                                cx.defer(prompt_for_directory);
                             }
                             ActionMessage::Open(crate::contracts::OpenAction::Picker) => {
                                 self.open_document_picker(cx)
@@ -1016,11 +1062,6 @@ impl MdvrView {
                             }
                             ActionMessage::History(crate::contracts::HistoryAction::Reload) => {
                                 self.reload(cx)
-                            }
-                            ActionMessage::Window(WindowAction::BeginDrag) => {
-                                if let Some(web_view) = self.web_view.as_ref() {
-                                    web_view.begin_window_drag();
-                                }
                             }
                             _ => {}
                         }
@@ -1557,7 +1598,14 @@ impl Drop for MdvrView {
 
 impl Render for MdvrView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.refresh_preferences();
+        let title = self
+            .shell
+            .current_document
+            .as_deref()
+            .and_then(std::path::Path::file_name)
+            .and_then(|name| name.to_str())
+            .unwrap_or("mdvr");
+        window.set_window_title(title);
         self.process_next_open(window, cx);
         if self.initialized {
             self.update_appearance(window);
@@ -1601,38 +1649,7 @@ impl Render for MdvrView {
         }
         if let Some(web_view) = self.web_view.as_ref() {
             web_view.sync_frame();
-            return div()
-                .relative()
-                .size_full()
-                .window_control_area(WindowControlArea::Drag)
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .w(px(72.0))
-                        .h(px(28.0))
-                        .window_control_area(WindowControlArea::Drag),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left(px(72.0))
-                        .w(px(40.0))
-                        .h(px(28.0))
-                        .window_control_area(WindowControlArea::Drag),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left(px(340.0))
-                        .right_0()
-                        .h(px(28.0))
-                        .window_control_area(WindowControlArea::Drag),
-                )
-                .into_any_element();
+            return div().size_full().into_any_element();
         }
         if let Some((path, bytes)) = self.pending_large.as_ref() {
             return div()
@@ -1719,11 +1736,7 @@ impl Render for MdvrView {
                                 .bg(gpui::rgb(0x3c4043))
                                 .child("Choose file")
                                 .on_click(cx.listener(|view, _, _, cx| {
-                                    if let Some(path) = choose_markdown_file() {
-                                        view.pending_open
-                                            .push_back(OpenRequest { path, ack: None });
-                                        cx.notify();
-                                    }
+                                    view.prompt_for_picker_document(cx);
                                 })),
                         )
                         .child(
@@ -1736,9 +1749,7 @@ impl Render for MdvrView {
                                 .bg(gpui::rgb(0x3c4043))
                                 .child("Browse folder")
                                 .on_click(cx.listener(|view, _, _, cx| {
-                                    if let Some(path) = choose_directory() {
-                                        view.open_directory(path, cx);
-                                    }
+                                    view.prompt_for_picker_directory(cx);
                                 })),
                         ),
                 )
@@ -1785,9 +1796,7 @@ impl Render for MdvrView {
                                     .bg(gpui::rgb(0x3c4043))
                                     .child("Choose folder")
                                     .on_click(cx.listener(|view, _, _, cx| {
-                                        if let Some(path) = choose_directory() {
-                                            view.open_directory(path, cx);
-                                        }
+                                        view.prompt_for_picker_directory(cx);
                                     })),
                             ),
                     )
@@ -1799,34 +1808,31 @@ impl Render for MdvrView {
 
 struct PreferencesView {
     preferences: Preferences,
+    #[allow(dead_code)]
+    preferences_subscription: Subscription,
     status: Option<String>,
 }
 
 impl PreferencesView {
-    fn save(&mut self) {
-        let Some(path) = conventional_path() else {
-            self.status = Some("Preferences path unavailable".into());
-            return;
-        };
-        self.status = Some(match save(&path, &self.preferences) {
-            Ok(()) => "Saved".into(),
-            Err(error) => format!("Save failed: {error}"),
-        });
+    fn save(&mut self, cx: &mut Context<Self>) {
+        publish_preferences(cx, &self.preferences);
+        self.status = Some("Saved".into());
+        cx.notify();
     }
 
-    fn adjust_scale(&mut self, delta: i16) {
+    fn adjust_scale(&mut self, delta: i16, cx: &mut Context<Self>) {
         let next = (i32::from(self.preferences.text_scale_percent) + i32::from(delta))
             .clamp(50, 300) as u16;
         let _ = self.preferences.set_text_scale(next);
-        self.save();
+        self.save(cx);
     }
 
-    fn toggle_zed_config(&mut self) {
+    fn toggle_zed_config(&mut self, cx: &mut Context<Self>) {
         self.preferences.use_zed_config = !self.preferences.use_zed_config;
-        self.save();
+        self.save(cx);
     }
 
-    fn cycle_theme(&mut self) {
+    fn cycle_theme(&mut self, cx: &mut Context<Self>) {
         self.preferences.theme = match self.preferences.theme.as_deref() {
             None => Some("light".into()),
             Some("light") => Some("dark".into()),
@@ -1834,21 +1840,38 @@ impl PreferencesView {
             Some("Tokyo Night — Light") => Some("Tokyo Night — Dark".into()),
             _ => None,
         };
-        self.save();
+        self.save(cx);
     }
 }
 
 impl Render for PreferencesView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.preferences.theme.as_deref().unwrap_or("system");
-        let dark = match self.preferences.theme.as_deref() {
-            Some("light") => false,
-            Some("dark") => true,
-            _ => matches!(
-                window.appearance(),
-                WindowAppearance::Dark | WindowAppearance::VibrantDark
-            ),
-        };
+        let shared = cx.global::<SharedPreferences>();
+        let selected = self
+            .preferences
+            .theme
+            .as_deref()
+            .and_then(|name| shared.theme_family.member(name))
+            .or(shared
+                .zed_theme
+                .as_ref()
+                .filter(|_| self.preferences.theme.is_none()));
+        let dark = selected.map_or_else(
+            || match self.preferences.theme.as_deref() {
+                Some("light") => false,
+                Some("dark") => true,
+                _ => matches!(
+                    window.appearance(),
+                    WindowAppearance::Dark | WindowAppearance::VibrantDark
+                ),
+            },
+            |theme| theme.tokens.mode == AppearanceMode::Dark,
+        );
+        set_window_appearance(
+            window,
+            (self.preferences.theme.is_some() || selected.is_some()).then_some(dark),
+        );
         let background = if dark {
             gpui::rgb(0x202124)
         } else {
@@ -1894,13 +1917,13 @@ impl Render for PreferencesView {
                     .cursor_pointer()
                     .bg(gpui::rgb(0x3c4043))
                     .child("Cycle toolbar icons")
-                    .on_click(cx.listener(|view, _, _, _| {
+                    .on_click(cx.listener(|view, _, _, cx| {
                         view.preferences.toolbar_icons = match view.preferences.toolbar_icons {
                             ToolbarIcons::Icon => ToolbarIcons::IconAndText,
                             ToolbarIcons::IconAndText => ToolbarIcons::TextOnly,
                             ToolbarIcons::TextOnly => ToolbarIcons::Icon,
                         };
-                        view.save();
+                        view.save(cx);
                     })),
             )
             .child(
@@ -1912,14 +1935,14 @@ impl Render for PreferencesView {
                     .cursor_pointer()
                     .bg(gpui::rgb(0x3c4043))
                     .child("Cycle scrollbar visibility")
-                    .on_click(cx.listener(|view, _, _, _| {
+                    .on_click(cx.listener(|view, _, _, cx| {
                         view.preferences.scrollbar_visibility =
                             match view.preferences.scrollbar_visibility {
                                 ScrollbarVisibility::ShowOnScroll => ScrollbarVisibility::Show,
                                 ScrollbarVisibility::Show => ScrollbarVisibility::Hide,
                                 ScrollbarVisibility::Hide => ScrollbarVisibility::ShowOnScroll,
                             };
-                        view.save();
+                        view.save(cx);
                     })),
             )
             .child(
@@ -1938,7 +1961,7 @@ impl Render for PreferencesView {
                             "Off"
                         }
                     ))
-                    .on_click(cx.listener(|view, _, _, _| view.toggle_zed_config())),
+                    .on_click(cx.listener(|view, _, _, cx| view.toggle_zed_config(cx))),
             )
             .child(
                 div()
@@ -1958,7 +1981,7 @@ impl Render for PreferencesView {
                             .cursor_pointer()
                             .bg(gpui::rgb(0x3c4043))
                             .child("−")
-                            .on_click(cx.listener(|view, _, _, _| view.adjust_scale(-10))),
+                            .on_click(cx.listener(|view, _, _, cx| view.adjust_scale(-10, cx))),
                     )
                     .child(
                         div()
@@ -1969,7 +1992,7 @@ impl Render for PreferencesView {
                             .cursor_pointer()
                             .bg(gpui::rgb(0x3c4043))
                             .child("+")
-                            .on_click(cx.listener(|view, _, _, _| view.adjust_scale(10))),
+                            .on_click(cx.listener(|view, _, _, cx| view.adjust_scale(10, cx))),
                     ),
             )
             .child(
@@ -1981,7 +2004,7 @@ impl Render for PreferencesView {
                     .cursor_pointer()
                     .bg(gpui::rgb(0x3c4043))
                     .child("Cycle theme")
-                    .on_click(cx.listener(|view, _, _, _| view.cycle_theme())),
+                    .on_click(cx.listener(|view, _, _, cx| view.cycle_theme(cx))),
             )
             .child(
                 self.status
@@ -1994,11 +2017,62 @@ impl Render for PreferencesView {
 fn active_mdvr_window(cx: &mut App) -> Option<gpui::WindowHandle<MdvrView>> {
     cx.active_window()
         .and_then(|window| window.downcast::<MdvrView>())
-        .or_else(|| {
-            cx.windows()
-                .into_iter()
-                .find_map(|window| window.downcast::<MdvrView>())
-        })
+}
+
+fn prompt_for_path(
+    cx: &mut App,
+    options: PathPromptOptions,
+    on_selected: impl FnOnce(PathBuf, &mut App) + 'static,
+) {
+    let receiver = cx.prompt_for_paths(options);
+    cx.spawn(async move |cx| {
+        let Ok(Ok(Some(paths))) = receiver.await else {
+            return;
+        };
+        let Some(path) = paths.into_iter().next() else {
+            return;
+        };
+        let _ = cx.update(|cx| on_selected(path, cx));
+    })
+    .detach();
+}
+
+fn prompt_for_document(cx: &mut App) {
+    prompt_for_path(
+        cx,
+        PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Open Markdown".into()),
+        },
+        |path, cx| {
+            let markdown = path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| {
+                    matches!(extension.to_ascii_lowercase().as_str(), "md" | "markdown")
+                });
+            if markdown {
+                open_new_window(cx, path, LaunchIntent::ExplicitFile);
+            } else {
+                eprintln!("mdvr: selected file is not Markdown: {}", path.display());
+            }
+        },
+    );
+}
+
+fn prompt_for_directory(cx: &mut App) {
+    prompt_for_path(
+        cx,
+        PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Open Folder".into()),
+        },
+        |path, cx| open_new_window(cx, path, LaunchIntent::ExplicitDirectory),
+    );
 }
 
 fn open_new_window(cx: &mut App, path: PathBuf, intent: LaunchIntent) {
@@ -2029,9 +2103,7 @@ fn open_new_window(cx: &mut App, path: PathBuf, intent: LaunchIntent) {
 }
 
 fn open_file_action(_: &OpenFileAction, cx: &mut App) {
-    if let Some(path) = choose_markdown_file() {
-        cx.defer(move |cx| open_new_window(cx, path, LaunchIntent::ExplicitFile));
-    }
+    cx.defer(prompt_for_document);
 }
 
 fn close_window_action(_: &CloseWindow, cx: &mut App) {
@@ -2053,9 +2125,7 @@ fn show_picker_action(_: &ShowPicker, cx: &mut App) {
 }
 
 fn open_folder_action(_: &OpenFolderAction, cx: &mut App) {
-    if let Some(path) = choose_directory() {
-        cx.defer(move |cx| open_new_window(cx, path, LaunchIntent::ExplicitDirectory));
-    }
+    cx.defer(prompt_for_directory);
 }
 
 fn show_preferences(_: &ShowPreferences, cx: &mut App) {
@@ -2066,9 +2136,7 @@ fn show_preferences(_: &ShowPreferences, cx: &mut App) {
     {
         return;
     }
-    let preferences = conventional_path()
-        .map(|path| load_or_default(&path).preferences)
-        .unwrap_or_default();
+    let preferences = cx.global::<SharedPreferences>().preferences.clone();
     let _ = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
@@ -2077,16 +2145,24 @@ fn show_preferences(_: &ShowPreferences, cx: &mut App) {
             })),
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("Preferences".into()),
-                appears_transparent: true,
+                appears_transparent: false,
                 traffic_light_position: None,
             }),
             is_resizable: true,
             ..WindowOptions::default()
         },
         move |_, cx| {
-            cx.new(|_| PreferencesView {
-                preferences,
-                status: None,
+            cx.new(|cx| {
+                let preferences_subscription =
+                    cx.observe_global::<SharedPreferences>(|view: &mut PreferencesView, cx| {
+                        view.preferences = cx.global::<SharedPreferences>().preferences.clone();
+                        cx.notify();
+                    });
+                PreferencesView {
+                    preferences,
+                    preferences_subscription,
+                    status: None,
+                }
             })
         },
     );
@@ -2157,7 +2233,7 @@ fn open_mdvr_window(cx: &mut App, launch: LaunchPlan, announce: bool) {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("mdvr".into()),
-                appears_transparent: true,
+                appears_transparent: false,
                 traffic_light_position: None,
             }),
             is_resizable: true,
@@ -2207,6 +2283,10 @@ pub fn run(launch: LaunchPlan) {
         }
     });
     application.run(move |cx: &mut App| {
+        let preferences = conventional_path()
+            .map(|path| load_or_default(&path).preferences)
+            .unwrap_or_default();
+        cx.set_global(SharedPreferences::new(preferences));
         cx.on_action(open_file_action);
         cx.on_action(open_folder_action);
         cx.on_action(show_picker_action);

@@ -10,12 +10,11 @@ pub(crate) mod remote_policy;
 pub(crate) mod resource_policy;
 
 use std::{
-    ffi::CStr,
     fs,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, OnceLock,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
@@ -44,8 +43,6 @@ use wry::{
 
 static ACCEPTED_BRIDGE_MESSAGES: AtomicU64 = AtomicU64::new(0);
 static REJECTED_BRIDGE_MESSAGES: AtomicU64 = AtomicU64::new(0);
-static BRIDGE_ROUTER: OnceLock<Mutex<BridgeRouter>> = OnceLock::new();
-
 const DEV_WEB_ASSET_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/web/dist");
 
 fn valid_web_asset_root(root: &Path) -> Option<PathBuf> {
@@ -110,6 +107,36 @@ fn canonical_bridge_message(bytes: &[u8]) -> Result<Vec<u8>, ContractError> {
     encode(&decode(bytes)?)
 }
 
+pub(crate) fn set_window_appearance(window: &Window, dark: Option<bool>) {
+    if !main_thread() {
+        return;
+    }
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return;
+    };
+    unsafe {
+        let view = handle.ns_view.as_ptr() as id;
+        let native_window: id = msg_send![view, window];
+        if native_window == nil {
+            return;
+        }
+        let appearance = dark.map_or(nil, |dark| {
+            let name = NSString::alloc(nil).init_str(if dark {
+                "NSAppearanceNameDarkAqua"
+            } else {
+                "NSAppearanceNameAqua"
+            });
+            let appearance: id = msg_send![class!(NSAppearance), appearanceNamed: name];
+            let _: () = msg_send![name, release];
+            appearance
+        });
+        let _: () = msg_send![native_window, setAppearance: appearance];
+    }
+}
+
 fn main_thread() -> bool {
     unsafe {
         let is_main: objc::runtime::BOOL = msg_send![class!(NSThread), isMainThread];
@@ -119,14 +146,6 @@ fn main_thread() -> bool {
 
 fn reject_bridge_message() {
     REJECTED_BRIDGE_MESSAGES.fetch_add(1, Ordering::Relaxed);
-}
-
-/// Drain validated actions without exposing paths, files, or native handles.
-pub(crate) fn drain_bridge_messages() -> Vec<BridgeMessage> {
-    BRIDGE_ROUTER
-        .get()
-        .and_then(|router| router.lock().ok())
-        .map_or_else(Vec::new, |mut router| router.drain())
 }
 
 /// Update action authorization context after native document commit.
@@ -224,51 +243,6 @@ pub(crate) fn open_local_file(path: &Path, require_confirmation: bool) -> bool {
     }
 }
 
-fn choose_path(files: bool, directories: bool, extensions: &[&str]) -> Option<PathBuf> {
-    if !main_thread() {
-        return None;
-    }
-    unsafe {
-        let panel: id = msg_send![class!(NSOpenPanel), openPanel];
-        if panel.is_null() {
-            eprintln!("mdvr: NSOpenPanel unavailable");
-            return None;
-        }
-        let _: () = msg_send![panel, setCanChooseFiles: files];
-        let _: () = msg_send![panel, setCanChooseDirectories: directories];
-        let _: () = msg_send![panel, setAllowsMultipleSelection: false];
-        if !extensions.is_empty() {
-            let types: id = msg_send![class!(NSMutableArray), array];
-            for extension in extensions {
-                let value = NSString::alloc(nil).init_str(extension);
-                let _: () = msg_send![types, addObject: value];
-                let _: () = msg_send![value, release];
-            }
-            let _: () = msg_send![panel, setAllowedFileTypes: types];
-        }
-        let response: isize = msg_send![panel, runModal];
-        if response != 1 {
-            return None;
-        }
-        let url: id = msg_send![panel, URL];
-        let path: id = msg_send![url, path];
-        let bytes: *const std::os::raw::c_char = msg_send![path, UTF8String];
-        (!bytes.is_null()).then(|| PathBuf::from(CStr::from_ptr(bytes).to_string_lossy().as_ref()))
-    }
-}
-
-pub(crate) fn choose_json_file() -> Option<PathBuf> {
-    choose_path(true, false, &["json"])
-}
-
-pub(crate) fn choose_markdown_file() -> Option<PathBuf> {
-    choose_path(true, false, &["md", "markdown"])
-}
-
-pub(crate) fn choose_directory() -> Option<PathBuf> {
-    choose_path(false, true, &[])
-}
-
 pub(crate) fn file_url_path(url: &str) -> Option<PathBuf> {
     if url.contains(char::is_control) {
         return None;
@@ -293,28 +267,12 @@ pub(crate) fn open_external_url(url: &str) -> bool {
     }
 }
 
-pub(crate) fn reset_bridge_messages() {
-    if let Some(router) = BRIDGE_ROUTER.get()
-        && let Ok(mut router) = router.lock()
-    {
-        router.clear();
-    }
-}
-
-pub(crate) fn update_bridge_context(context: BridgeContext) {
-    let router = BRIDGE_ROUTER.get_or_init(|| Mutex::new(BridgeRouter::new(context)));
-    if let Ok(mut router) = router.lock() {
-        router.set_context(context);
-    }
-}
-
-fn receive_bridge_message(message: &str) {
+fn receive_bridge_message(router: &Mutex<BridgeRouter>, message: &str) {
     let accepted = (message.len() <= MAX_FRAME_BYTES)
         .then_some(message.as_bytes())
         .and_then(|bytes| canonical_bridge_message(bytes).ok())
         .is_some_and(|bytes| {
-            BRIDGE_ROUTER
-                .get_or_init(|| Mutex::new(BridgeRouter::new(BridgeContext::default())))
+            router
                 .lock()
                 .ok()
                 .is_some_and(|mut router| router.accept(&bytes).is_ok())
@@ -563,6 +521,7 @@ impl PendingPageState {
 pub struct EmbeddedWebView {
     parent: id,
     view: WebView,
+    router: Arc<Mutex<BridgeRouter>>,
     current_generation: DocumentGeneration,
     #[allow(dead_code)]
     appearance_generation: AppearanceGeneration,
@@ -689,16 +648,10 @@ impl EmbeddedWebView {
         self.view.focus().is_ok()
     }
 
-    pub fn begin_window_drag(&self) {
-        assert!(main_thread(), "Wry WebView must be used on main thread");
-        unsafe {
-            let app: id = cocoa::appkit::NSApp();
-            let event: id = msg_send![app, currentEvent];
-            let window: id = msg_send![self.parent, window];
-            if window != nil && event != nil {
-                let _: () = msg_send![window, performWindowDragWithEvent: event];
-            }
-        }
+    pub(crate) fn drain_bridge_messages(&self) -> Vec<BridgeMessage> {
+        self.router
+            .lock()
+            .map_or_else(|_| Vec::new(), |mut router| router.drain())
     }
 
     pub fn sync_frame(&self) {
@@ -727,6 +680,8 @@ impl EmbeddedWebView {
         let initial_bounds = unsafe { NSView::bounds(parent) };
         let page_loaded = Arc::new(AtomicBool::new(false));
         let page_loaded_callback = page_loaded.clone();
+        let router = Arc::new(Mutex::new(BridgeRouter::new(BridgeContext::default())));
+        let ipc_router = router.clone();
         let protocol_root = root.clone();
         let view = WebViewBuilder::new()
             .with_custom_protocol("mdvr".into(), move |_id, request: Request<Vec<u8>>| {
@@ -746,7 +701,7 @@ impl EmbeddedWebView {
                         .map(Into::into),
                 }
             })
-            .with_ipc_handler(|request| receive_bridge_message(request.body()))
+            .with_ipc_handler(move |request| receive_bridge_message(&ipc_router, request.body()))
             .with_on_page_load_handler(move |event, url| {
                 if matches!(event, PageLoadEvent::Finished) && url == "mdvr://localhost/index.html"
                 {
@@ -769,6 +724,7 @@ impl EmbeddedWebView {
         Some(Self {
             parent,
             view,
+            router,
             current_generation: DocumentGeneration::default(),
             appearance_generation: AppearanceGeneration::default(),
             pending_state: Box::new(PendingPageState::default()),
@@ -827,6 +783,9 @@ impl EmbeddedWebView {
             document,
             generation,
         };
+        if let Ok(mut router) = self.router.lock() {
+            router.set_context(context);
+        }
         if !self.pending_state.replace_context(context) {
             return Ok(());
         }
@@ -997,7 +956,6 @@ impl Drop for EmbeddedWebView {
             main_thread(),
             "Wry WebView must be torn down on main thread"
         );
-        reset_bridge_messages();
     }
 }
 
