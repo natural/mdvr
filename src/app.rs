@@ -8,7 +8,7 @@ use std::{
         atomic::AtomicBool,
         mpsc::{Receiver, Sender, channel},
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use gpui::{
@@ -25,6 +25,7 @@ actions!(
         ShowPreferences,
         ShowPicker,
         CycleToolbarVisibility,
+        CloseWindow,
         QuitApp,
         AboutMdvr
     ]
@@ -315,6 +316,7 @@ struct MdvrView {
     initial_load_task: Option<Task<()>>,
     navigation_load_task: Option<Task<()>>,
     toolbar_visibility: ScrollbarVisibility,
+    preferences_stamp: Option<SystemTime>,
     render_started: Option<Instant>,
     initialized: bool,
     remote_consent: Option<(crate::contracts::DocumentId, bool)>,
@@ -328,6 +330,13 @@ impl MdvrView {
         let Some(path) = conventional_path() else {
             return;
         };
+        let stamp = fs::metadata(&path)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok());
+        if stamp == self.preferences_stamp && self.initialized {
+            return;
+        }
+        self.preferences_stamp = stamp;
         let preferences = load_or_default(&path).preferences;
         if preferences == self.preferences {
             return;
@@ -395,6 +404,7 @@ impl MdvrView {
             initial_load_task: None,
             navigation_load_task: None,
             toolbar_visibility: ScrollbarVisibility::ShowOnScroll,
+            preferences_stamp: None,
             render_started: None,
             initialized: false,
             remote_consent: None,
@@ -441,6 +451,9 @@ impl MdvrView {
         self.preferences = conventional_path()
             .map(|path| load_or_default(&path).preferences)
             .unwrap_or_default();
+        self.preferences_stamp = conventional_path()
+            .and_then(|path| fs::metadata(path).ok())
+            .and_then(|metadata| metadata.modified().ok());
         self.initialized = true;
         self.shell.text_scale_percent = self.preferences.text_scale_percent;
         self.pending_initial_locator = launch.state.reading_locator.clone();
@@ -831,6 +844,12 @@ impl MdvrView {
             },
             |theme| theme.tokens.mode,
         );
+        if self.appearance_mode == Some(mode) {
+            return;
+        }
+        let Some(generation) = self.bridge_context.generation else {
+            return;
+        };
         if let Some(web_view) = self.web_view.as_mut() {
             let names = self
                 .theme_family
@@ -851,12 +870,6 @@ impl MdvrView {
             web_view.set_toolbar_icons(self.preferences.toolbar_icons);
             web_view.set_toolbar_visibility(self.toolbar_visibility);
         }
-        if self.appearance_mode == Some(mode) {
-            return;
-        }
-        let Some(generation) = self.bridge_context.generation else {
-            return;
-        };
         let tokens = selected_theme
             .map(|theme| theme.tokens.clone())
             .unwrap_or_else(|| default_theme(mode).tokens);
@@ -1582,12 +1595,22 @@ impl Render for MdvrView {
             return div()
                 .relative()
                 .size_full()
+                .window_control_area(WindowControlArea::Drag)
                 .child(
                     div()
                         .absolute()
                         .top_0()
                         .left_0()
                         .w(px(72.0))
+                        .h(px(28.0))
+                        .window_control_area(WindowControlArea::Drag),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left(px(72.0))
+                        .w(px(40.0))
                         .h(px(28.0))
                         .window_control_area(WindowControlArea::Drag),
                 )
@@ -2000,6 +2023,12 @@ fn open_file_action(_: &OpenFileAction, cx: &mut App) {
     }
 }
 
+fn close_window_action(_: &CloseWindow, cx: &mut App) {
+    if let Some(window) = cx.active_window() {
+        let _ = window.update(cx, |_, window, _| window.remove_window());
+    }
+}
+
 fn cycle_toolbar_visibility_action(_: &CycleToolbarVisibility, cx: &mut App) {
     if let Some(window) = active_mdvr_window(cx) {
         let _ = window.update(cx, |view, _, _| view.cycle_toolbar_visibility());
@@ -2166,6 +2195,7 @@ pub fn run(launch: LaunchPlan) {
         cx.on_action(open_folder_action);
         cx.on_action(show_picker_action);
         cx.on_action(cycle_toolbar_visibility_action);
+        cx.on_action(close_window_action);
         cx.on_action(show_preferences);
         cx.on_action(quit_app);
         cx.on_action(about_mdvr);
@@ -2174,6 +2204,7 @@ pub fn run(launch: LaunchPlan) {
             gpui::KeyBinding::new("cmd-shift-o", OpenFolderAction, None),
             gpui::KeyBinding::new("cmd-p", ShowPicker, None),
             gpui::KeyBinding::new("cmd-shift-b", CycleToolbarVisibility, None),
+            gpui::KeyBinding::new("cmd-w", CloseWindow, None),
             gpui::KeyBinding::new("cmd-,", ShowPreferences, None),
             gpui::KeyBinding::new("cmd-q", QuitApp, None),
         ]);
@@ -2196,6 +2227,7 @@ pub fn run(launch: LaunchPlan) {
                     MenuItem::separator(),
                     MenuItem::action("Browse Files", ShowPicker),
                     MenuItem::action("Cycle Toolbar Visibility", CycleToolbarVisibility),
+                    MenuItem::action("Close Window", CloseWindow),
                 ],
             },
         ]);
