@@ -22,6 +22,11 @@
       #status { position: fixed; z-index: 4; left: 50%; bottom: 1rem; translate: -50% 0; display: flex; gap: .75rem; align-items: center; max-width: min(42rem, 90vw); padding: .65rem .85rem; border-radius: .4rem; background: Canvas; color: CanvasText; box-shadow: 0 .2rem .8rem #0006; }
       #status[hidden] { display: none; }
       #status button { font: inherit; }
+      #document.preferences { box-sizing: border-box; max-width: 42rem; min-height: 100%; margin: 0 auto; padding: 2rem; font: 15px/1.4 system-ui, sans-serif; background: var(--pref-bg, Canvas); color: var(--pref-fg, CanvasText); }
+      #document.preferences form { display: grid; gap: 1rem; }
+      #document.preferences label { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+      #document.preferences select, #document.preferences input { font: inherit; color: var(--pref-fg, CanvasText); background: var(--pref-control, Canvas); }
+      #document.preferences input[type="range"] { width: 12rem; }
       @media (max-width: 38rem) {
         #outline { display: none !important; }
       }
@@ -52,6 +57,43 @@
           root.style.setProperty("--reader-code-font", codeFamily || "ui-monospace");
           root.style.setProperty("--reader-ui-size", Number.isFinite(uiSize) ? `${uiSize}px` : "16px");
           root.style.setProperty("--reader-code-size", Number.isFinite(codeSize) ? `${codeSize}px` : "0.9em");
+        };
+        const preferencesPage = new URLSearchParams(location.search).has('preferences');
+        window.mdvrSetPreferences = (useZed, theme, scale, themes = [], dark = false, background = '#ffffff', foreground = '#222222', control = '#eeeeee') => {
+          if (!preferencesPage) return;
+          const root = document.querySelector('#document');
+          root.className = 'preferences';
+          root.style.setProperty('--pref-bg', background);
+          root.style.setProperty('--pref-fg', foreground);
+          root.style.setProperty('--pref-control', control);
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+          document.body.style.background = background;
+          document.body.style.color = foreground;
+          if (root.dataset.preferencesReady === 'true') {
+            const active = document.activeElement;
+            if (active?.id !== 'pref-zed' && active?.id !== 'pref-theme' && active?.id !== 'pref-scale') {
+              root.querySelector('#pref-zed').checked = Boolean(useZed);
+              root.querySelector('#pref-theme').value = theme ?? '';
+              root.querySelector('#pref-scale').value = String(scale);
+              root.querySelector('#pref-scale-value').textContent = `${scale}%`;
+            }
+            return;
+          }
+          root.dataset.preferencesReady = 'true';
+          root.innerHTML = '<h1>Preferences</h1><form><label><span>Use Zed theme and fonts</span><input id="pref-zed" type="checkbox"></label><label><span>Theme</span><select id="pref-theme"></select></label><label><span>Text size</span><input id="pref-scale" type="range" min="50" max="300" step="1"><output id="pref-scale-value"></output></label></form>';
+          const zed = root.querySelector('#pref-zed');
+          const select = root.querySelector('#pref-theme');
+          const slider = root.querySelector('#pref-scale');
+          const output = root.querySelector('#pref-scale-value');
+          zed.checked = Boolean(useZed);
+          select.replaceChildren(...themes.map(value => { const option = document.createElement('option'); option.value = value ?? ''; option.textContent = value === null ? 'System' : value === 'light' ? 'Light' : value === 'dark' ? 'Dark' : value; return option; }));
+          select.value = theme ?? '';
+          slider.value = String(scale);
+          output.textContent = `${scale}%`;
+          const send = () => postBridgeMessage({ kind: 'preferences', payload: { use_zed: zed.checked, theme: select.value || null, scale: Number(slider.value) } });
+          zed.addEventListener('change', send);
+          select.addEventListener('change', send);
+          slider.addEventListener('input', () => { output.textContent = `${slider.value}%`; send(); });
         };
         let nextRequestId = 1;
         const validBridgeAction = (action) => {

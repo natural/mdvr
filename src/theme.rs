@@ -184,11 +184,26 @@ impl ThemeFamily {
     pub fn member(&self, name: &str) -> Option<&Theme> {
         self.members.iter().find(|member| member.name == name)
     }
+
+    pub fn sort_members(&mut self) {
+        self.members.sort_by(|left, right| {
+            let mode = |theme: &Theme| match theme.tokens.mode {
+                AppearanceMode::Light => 0,
+                AppearanceMode::Dark => 1,
+            };
+            mode(left).cmp(&mode(right)).then_with(|| {
+                left.name
+                    .to_ascii_lowercase()
+                    .cmp(&right.name.to_ascii_lowercase())
+            })
+        });
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ZedFonts {
     pub ui_family: Option<String>,
+    pub ui_weight: Option<String>,
     pub buffer_family: Option<String>,
     pub ui_size: Option<f32>,
     pub buffer_size: Option<f32>,
@@ -202,6 +217,7 @@ pub struct ZedConfig {
 
 #[derive(serde::Deserialize)]
 struct ZedSettings {
+    ui_font_weight: Option<String>,
     ui_font_family: Option<String>,
     buffer_font_family: Option<String>,
     ui_font_size: Option<f32>,
@@ -403,6 +419,7 @@ pub fn load_zed_config() -> Option<ZedConfig> {
     let settings: ZedSettings = serde_json::from_str(&jsonc(&source)).ok()?;
     let fonts = ZedFonts {
         ui_family: safe_font(settings.ui_font_family),
+        ui_weight: safe_font(settings.ui_font_weight),
         buffer_family: safe_font(settings.buffer_font_family),
         ui_size: settings
             .ui_font_size
@@ -521,6 +538,7 @@ pub fn available_family() -> ThemeFamily {
             }
         }
     }
+    family.sort_members();
     family
 }
 

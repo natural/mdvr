@@ -12,9 +12,10 @@ use std::{
 };
 
 use gpui::{
-    App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Menu, MenuItem, MouseButton,
-    OsAction, PathPromptOptions, Render, Rgba, Subscription, SystemMenuType, Task, Timer, Window,
-    WindowAppearance, WindowBounds, WindowOptions, actions, div, point, prelude::*, px, size,
+    App, Application, Bounds, Context, FocusHandle, FontWeight, KeyDownEvent, Menu, MenuItem,
+    MouseButton, OsAction, PathPromptOptions, Render, Rgba, Subscription, SystemMenuType, Task,
+    Timer, Window, WindowAppearance, WindowBounds, WindowOptions, actions, div, point, prelude::*,
+    px, size,
 };
 
 actions!(
@@ -55,7 +56,7 @@ use crate::{
     },
     navigation::{LoadRequest, Locator, NavigationAction, NavigationState},
     platform::{
-        EmbeddedWebView, NativePreferencesControls, begin_window_drag,
+        EmbeddedWebView, PreferencesMessage, begin_window_drag,
         bridge::{BridgeContext, BridgeMessage},
         confirm_large_document, confirm_outside_resource, confirm_remote_images, file_url_path,
         install_close_shortcut, open_external_url, open_local_file, perform_redo, perform_undo,
@@ -63,6 +64,7 @@ use crate::{
         remote_policy::{RemoteLimits, RemotePolicy},
         resource_policy::{ResourceAuthorization, ResourceDenied, ResourcePolicy},
         set_titlebar_controls_visible, set_window_appearance, set_window_background_draggable,
+        show_about,
     },
     preferences::{
         DisplayBounds, LaunchIntent, Preferences, ReadingLocator, WindowGeometry,
@@ -83,6 +85,22 @@ struct OpenRequest {
 
 static OPEN_PATHS: OnceLock<Mutex<VecDeque<OpenRequest>>> = OnceLock::new();
 const MAIN_TITLEBAR_HEIGHT: f64 = 38.0;
+
+fn ui_font_weight(value: &str) -> Option<FontWeight> {
+    Some(match value.to_ascii_lowercase().as_str() {
+        "thin" => FontWeight::THIN,
+        "extra_light" | "extralight" => FontWeight::EXTRA_LIGHT,
+        "light" => FontWeight::LIGHT,
+        "normal" | "regular" => FontWeight::NORMAL,
+        "medium" => FontWeight::MEDIUM,
+        "semibold" | "semi_bold" => FontWeight::SEMIBOLD,
+        "bold" => FontWeight::BOLD,
+        "extra_bold" | "extrabold" => FontWeight::EXTRA_BOLD,
+        "black" => FontWeight::BLACK,
+        value if value.parse::<f32>().is_ok() => FontWeight(value.parse().ok()?),
+        _ => return None,
+    })
+}
 
 fn main_window_frame(titlebar: gpui::AnyElement, content: gpui::AnyElement) -> gpui::AnyElement {
     div()
@@ -341,6 +359,7 @@ impl SharedPreferences {
                 }
             }
         }
+        theme_family.sort_members();
         Self {
             preferences,
             theme_family,
@@ -476,6 +495,7 @@ struct MdvrView {
     reload_task: Option<Task<()>>,
     discovery_task: Option<Task<()>>,
     bridge_task: Option<Task<()>>,
+    appearance_task: Option<Task<()>>,
     resource_policy: Option<ResourcePolicy>,
     preferences: Preferences,
     #[allow(dead_code)]
@@ -530,6 +550,7 @@ impl MdvrView {
             reload_task: None,
             discovery_task: None,
             bridge_task: None,
+            appearance_task: None,
             resource_policy: None,
             preferences: cx.global::<SharedPreferences>().preferences.clone(),
             preferences_subscription,
@@ -590,6 +611,14 @@ impl MdvrView {
                         })
                         .is_err()
                 {
+                    return;
+                }
+            }
+        }));
+        self.appearance_task = Some(cx.spawn_in(window, async move |view, cx| {
+            loop {
+                Timer::after(Duration::from_millis(250)).await;
+                if view.update(cx, |_, cx| cx.notify()).is_err() {
                     return;
                 }
             }
@@ -1750,6 +1779,24 @@ impl MdvrView {
             .gap_1()
             .bg(palette.background)
             .text_color(palette.foreground)
+            .font_family(
+                self.zed_fonts
+                    .as_ref()
+                    .and_then(|fonts| fonts.ui_family.clone())
+                    .unwrap_or_else(|| "SF Mono".into()),
+            )
+            .text_size(px(self
+                .zed_fonts
+                .as_ref()
+                .and_then(|fonts| fonts.ui_size)
+                .unwrap_or(12.0)))
+            .when_some(
+                self.zed_fonts
+                    .as_ref()
+                    .and_then(|fonts| fonts.ui_weight.as_deref())
+                    .and_then(ui_font_weight),
+                |bar, weight| bar.font_weight(weight),
+            )
             .border_b_1()
             .border_color(palette.control)
             .child(drag("titlebar-drag-left").w(px(72.0)));
@@ -1806,7 +1853,6 @@ impl MdvrView {
                 .items_center()
                 .justify_end()
                 .pr_3()
-                .font_family("SF Mono")
                 .text_xs()
                 .child(title.to_owned()),
         )
@@ -1823,6 +1869,7 @@ impl Drop for MdvrView {
         let _ = self.discovery_task.take();
         let _ = self.initial_load_task.take();
         let _ = self.navigation_load_task.take();
+        let _ = self.appearance_task.take();
         let _ = &self.bridge_task;
     }
 }
@@ -2059,7 +2106,8 @@ impl Render for MdvrView {
 
 struct PreferencesView {
     preferences: Preferences,
-    controls: NativePreferencesControls,
+    web_view: EmbeddedWebView,
+    themes: Vec<Option<String>>,
     #[allow(dead_code)]
     preferences_subscription: Subscription,
     #[allow(dead_code)]
@@ -2068,20 +2116,14 @@ struct PreferencesView {
 
 impl PreferencesView {
     fn poll(&mut self, cx: &mut Context<Self>) {
-        let (use_zed, theme, scale) = self.controls.values();
-        if (use_zed, theme.as_deref(), scale)
-            == (
-                self.preferences.use_zed_config,
-                self.preferences.theme.as_deref(),
-                self.preferences.text_scale_percent,
-            )
-        {
-            return;
+        for message in self.web_view.drain_preferences() {
+            self.preferences.use_zed_config = message.use_zed;
+            self.preferences.theme = message.theme;
+            let _ = self.preferences.set_text_scale(message.scale);
+            publish_preferences(cx, &self.preferences);
         }
-        self.preferences.use_zed_config = use_zed;
-        self.preferences.theme = theme;
-        let _ = self.preferences.set_text_scale(scale);
-        publish_preferences(cx, &self.preferences);
+        self.web_view.flush_pending();
+        cx.notify();
     }
 }
 
@@ -2089,11 +2131,40 @@ impl Render for PreferencesView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_window_title("Preferences");
         let shared = cx.global::<SharedPreferences>();
+        let palette = ui_palette(&self.preferences, shared, window);
         set_window_appearance(
             window,
             (self.preferences.theme.is_some() || shared.zed_theme.is_some())
-                .then_some(ui_palette(&self.preferences, shared, window).dark),
+                .then_some(palette.dark),
         );
+        self.web_view.set_preferences(
+            &PreferencesMessage {
+                use_zed: self.preferences.use_zed_config,
+                theme: self.preferences.theme.clone(),
+                scale: self.preferences.text_scale_percent,
+            },
+            &self.themes,
+            palette.dark,
+            &format!(
+                "#{:02x}{:02x}{:02x}",
+                (palette.background.r * 255.0) as u8,
+                (palette.background.g * 255.0) as u8,
+                (palette.background.b * 255.0) as u8
+            ),
+            &format!(
+                "#{:02x}{:02x}{:02x}",
+                (palette.foreground.r * 255.0) as u8,
+                (palette.foreground.g * 255.0) as u8,
+                (palette.foreground.b * 255.0) as u8
+            ),
+            &format!(
+                "#{:02x}{:02x}{:02x}",
+                (palette.control.r * 255.0) as u8,
+                (palette.control.g * 255.0) as u8,
+                (palette.control.b * 255.0) as u8
+            ),
+        );
+        self.web_view.sync_frame(0.0);
         div().size_full()
     }
 }
@@ -2242,28 +2313,19 @@ fn show_preferences(_: &ShowPreferences, cx: &mut App) {
             ..WindowOptions::default()
         },
         move |window, cx| {
-            let controls = NativePreferencesControls::attach(
-                window,
-                preferences.use_zed_config,
-                preferences.theme.as_deref(),
-                preferences.text_scale_percent,
-                themes,
-            )
-            .expect("AppKit preferences controls");
+            let mut web_view =
+                EmbeddedWebView::attach_preferences(window).expect("preferences web view");
+            web_view.load_initial_document();
             let view = cx.new(|cx| {
                 let preferences_subscription =
                     cx.observe_global::<SharedPreferences>(|view: &mut PreferencesView, cx| {
                         view.preferences = cx.global::<SharedPreferences>().preferences.clone();
-                        view.controls.sync(
-                            view.preferences.use_zed_config,
-                            view.preferences.theme.as_deref(),
-                            view.preferences.text_scale_percent,
-                        );
                         cx.notify();
                     });
                 PreferencesView {
                     preferences,
-                    controls,
+                    web_view,
+                    themes,
                     preferences_subscription,
                     poll_task: None,
                 }
@@ -2298,7 +2360,7 @@ fn quit_app(_: &QuitApp, cx: &mut App) {
 }
 
 fn about_mdvr(_: &AboutMdvr, _cx: &mut App) {
-    eprintln!("mdvr {}", env!("CARGO_PKG_VERSION"));
+    show_about();
 }
 
 pub(crate) fn dock_launch(fallback: &LaunchPlan) -> LaunchPlan {
@@ -2488,14 +2550,6 @@ pub fn run(launch: LaunchPlan) {
                 ],
             },
             Menu {
-                name: "Window".into(),
-                items: vec![MenuItem::action("Close Window", CloseWindow)],
-            },
-            Menu {
-                name: "Help".into(),
-                items: vec![MenuItem::action("About mdvr", AboutMdvr)],
-            },
-            Menu {
                 name: "Edit".into(),
                 items: vec![
                     MenuItem::os_action("Undo", Undo, OsAction::Undo),
@@ -2506,6 +2560,14 @@ pub fn run(launch: LaunchPlan) {
                     MenuItem::os_action("Paste", Paste, OsAction::Paste),
                     MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
                 ],
+            },
+            Menu {
+                name: "Window".into(),
+                items: vec![MenuItem::action("Close Window", CloseWindow)],
+            },
+            Menu {
+                name: "Help".into(),
+                items: vec![MenuItem::action("About mdvr", AboutMdvr)],
             },
         ]);
         open_mdvr_window(cx, launch, true);

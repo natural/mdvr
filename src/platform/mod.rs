@@ -31,8 +31,8 @@ use crate::{
 use block2::RcBlock;
 use cocoa::{
     appkit::{NSEventMask, NSEventModifierFlags, NSView},
-    base::{BOOL, NO, YES, id, nil},
-    foundation::{NSPoint, NSRect, NSSize, NSString},
+    base::{BOOL, id, nil},
+    foundation::NSString,
 };
 use gpui::Window;
 use objc::{class, msg_send, sel, sel_impl};
@@ -72,7 +72,7 @@ fn resolve_web_asset_root(executable: &Path, development_root: &Path) -> Option<
 }
 
 fn navigation_allowed_url(url: String) -> bool {
-    url == "mdvr://localhost/index.html"
+    url == "mdvr://localhost/index.html" || url == "mdvr://localhost/index.html?preferences"
 }
 
 fn asset_path(root: &Path, relative: &str) -> Option<PathBuf> {
@@ -153,159 +153,11 @@ pub(crate) fn install_close_shortcut() {
     }
 }
 
-pub(crate) struct NativePreferencesControls {
-    container: id,
-    zed: id,
-    theme: id,
-    scale: id,
-    scale_label: id,
-    themes: Vec<Option<String>>,
-}
-
-impl NativePreferencesControls {
-    pub(crate) fn attach(
-        window: &Window,
-        use_zed: bool,
-        theme: Option<&str>,
-        scale: u16,
-        themes: Vec<Option<String>>,
-    ) -> Option<Self> {
-        let handle = HasWindowHandle::window_handle(window).ok()?;
-        let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
-            return None;
-        };
-        unsafe {
-            let native_view = handle.ns_view.as_ptr() as id;
-            let frame: NSRect = msg_send![native_view, bounds];
-            let container: id = msg_send![class!(NSView), alloc];
-            let container: id = msg_send![container, initWithFrame: frame];
-            let _: () = msg_send![container, setAutoresizingMask: 18_u64];
-            let _: () = msg_send![container, setWantsLayer: YES];
-            let layer: id = msg_send![container, layer];
-            let color: id = msg_send![class!(NSColor), windowBackgroundColor];
-            let cg_color: id = msg_send![color, CGColor];
-            let _: () = msg_send![layer, setBackgroundColor: cg_color];
-            let _: () = msg_send![native_view, addSubview: container];
-
-            let label = |text: &str, frame: NSRect| {
-                let value = NSString::alloc(nil).init_str(text);
-                let control: id = msg_send![class!(NSTextField), labelWithString: value];
-                let _: () = msg_send![control, setFrame: frame];
-                let _: () = msg_send![container, addSubview: control];
-                let _: () = msg_send![value, release];
-                control
-            };
-            label(
-                "Appearance",
-                NSRect::new(NSPoint::new(24., 184.), NSSize::new(120., 22.)),
-            );
-            label(
-                "Theme",
-                NSRect::new(NSPoint::new(24., 143.), NSSize::new(90., 22.)),
-            );
-            label(
-                "Text size",
-                NSRect::new(NSPoint::new(24., 62.), NSSize::new(90., 22.)),
-            );
-
-            let zed: id = msg_send![class!(NSButton), alloc];
-            let zed: id = msg_send![zed, initWithFrame: NSRect::new(NSPoint::new(20., 101.), NSSize::new(300., 24.))];
-            let title = NSString::alloc(nil).init_str("Use Zed theme and fonts");
-            let _: () = msg_send![zed, setButtonType: 3_u64];
-            let _: () = msg_send![zed, setTitle: title];
-            let _: () = msg_send![zed, setState: if use_zed { 1_isize } else { 0_isize }];
-            let _: () = msg_send![container, addSubview: zed];
-            let _: () = msg_send![zed, release];
-            let _: () = msg_send![title, release];
-
-            let theme_control: id = msg_send![class!(NSPopUpButton), alloc];
-            let theme_control: id = msg_send![theme_control, initWithFrame: NSRect::new(NSPoint::new(114., 138.), NSSize::new(280., 30.)) pullsDown: NO];
-            for name in &themes {
-                let label = match name.as_deref() {
-                    None => "System",
-                    Some("light") => "Light",
-                    Some("dark") => "Dark",
-                    Some(name) => name,
-                };
-                let title = NSString::alloc(nil).init_str(label);
-                let _: () = msg_send![theme_control, addItemWithTitle: title];
-                let _: () = msg_send![title, release];
-            }
-            let selected = themes
-                .iter()
-                .position(|value| value.as_deref() == theme)
-                .unwrap_or(0);
-            let _: () = msg_send![theme_control, selectItemAtIndex: selected as isize];
-            let _: () = msg_send![container, addSubview: theme_control];
-            let _: () = msg_send![theme_control, release];
-
-            let slider: id = msg_send![class!(NSSlider), alloc];
-            let slider: id = msg_send![slider, initWithFrame: NSRect::new(NSPoint::new(114., 57.), NSSize::new(220., 28.))];
-            let _: () = msg_send![slider, setMinValue: 50_f64];
-            let _: () = msg_send![slider, setMaxValue: 300_f64];
-            let _: () = msg_send![slider, setDoubleValue: f64::from(scale)];
-            let _: () = msg_send![slider, setContinuous: YES];
-            let _: () = msg_send![container, addSubview: slider];
-            let _: () = msg_send![slider, release];
-            let scale_label = label(
-                &format!("{scale}%"),
-                NSRect::new(NSPoint::new(346., 62.), NSSize::new(56., 22.)),
-            );
-
-            Some(Self {
-                container,
-                zed,
-                theme: theme_control,
-                scale: slider,
-                scale_label,
-                themes,
-            })
-        }
-    }
-
-    pub(crate) fn sync(&self, use_zed: bool, theme: Option<&str>, scale: u16) {
-        unsafe {
-            let _: () = msg_send![self.zed, setState: if use_zed { 1_isize } else { 0_isize }];
-            if let Some(selected) = self
-                .themes
-                .iter()
-                .position(|value| value.as_deref() == theme)
-            {
-                let _: () = msg_send![self.theme, selectItemAtIndex: selected as isize];
-            }
-            let _: () = msg_send![self.scale, setDoubleValue: f64::from(scale)];
-        }
-    }
-
-    pub(crate) fn values(&self) -> (bool, Option<String>, u16) {
-        unsafe {
-            let zed: isize = msg_send![self.zed, state];
-            let selected: isize = msg_send![self.theme, indexOfSelectedItem];
-            let scale: f64 = msg_send![self.scale, doubleValue];
-            let scale = scale.round().clamp(50., 300.) as u16;
-            let value = NSString::alloc(nil).init_str(&format!("{scale}%"));
-            let _: () = msg_send![self.scale_label, setStringValue: value];
-            let _: () = msg_send![value, release];
-            (
-                zed != 0,
-                usize::try_from(selected)
-                    .ok()
-                    .and_then(|index| self.themes.get(index))
-                    .cloned()
-                    .flatten(),
-                scale,
-            )
-        }
-    }
-}
-
-impl Drop for NativePreferencesControls {
-    fn drop(&mut self) {
-        unsafe {
-            let _: () = msg_send![self.container, removeFromSuperview];
-            let _: () = msg_send![self.container, release];
-        }
-    }
+#[derive(Clone, Debug)]
+pub(crate) struct PreferencesMessage {
+    pub use_zed: bool,
+    pub theme: Option<String>,
+    pub scale: u16,
 }
 
 pub(crate) fn set_window_background_draggable(window: &Window, draggable: bool) {
@@ -366,6 +218,15 @@ pub(crate) fn begin_window_drag(window: &Window) {
     }
 }
 
+pub(crate) fn show_about() {
+    let _ = confirm(
+        "mdvr",
+        concat!("Markdown reader ", env!("CARGO_PKG_VERSION")),
+        "OK",
+        "",
+    );
+}
+
 pub(crate) fn set_window_appearance(window: &Window, dark: Option<bool>) {
     if !main_thread() {
         return;
@@ -420,11 +281,14 @@ fn confirm(title: &str, detail: &str, allow: &str, cancel: &str) -> bool {
         let title = NSString::alloc(nil).init_str(title);
         let detail = NSString::alloc(nil).init_str(detail);
         let allow = NSString::alloc(nil).init_str(allow);
+        let has_cancel = !cancel.is_empty();
         let cancel = NSString::alloc(nil).init_str(cancel);
         let _: () = msg_send![alert, setMessageText: title];
         let _: () = msg_send![alert, setInformativeText: detail];
         let _: id = msg_send![alert, addButtonWithTitle: allow];
-        let _: id = msg_send![alert, addButtonWithTitle: cancel];
+        if has_cancel {
+            let _: id = msg_send![alert, addButtonWithTitle: cancel];
+        }
         let application: id = msg_send![class!(NSApplication), sharedApplication];
         let _: () = msg_send![application, activateIgnoringOtherApps: true];
         let window: id = msg_send![alert, window];
@@ -526,7 +390,48 @@ pub(crate) fn open_external_url(url: &str) -> bool {
     }
 }
 
-fn receive_bridge_message(router: &Mutex<BridgeRouter>, message: &str) {
+fn receive_bridge_message(
+    router: &Mutex<BridgeRouter>,
+    preferences: &Mutex<Vec<PreferencesMessage>>,
+    message: &str,
+) {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(message)
+        && value.get("kind").and_then(serde_json::Value::as_str) == Some("preferences")
+    {
+        let Some(payload) = value.get("payload").and_then(serde_json::Value::as_object) else {
+            reject_bridge_message();
+            return;
+        };
+        let Some(use_zed) = payload.get("use_zed").and_then(serde_json::Value::as_bool) else {
+            reject_bridge_message();
+            return;
+        };
+        let Some(scale) = payload.get("scale").and_then(serde_json::Value::as_u64) else {
+            reject_bridge_message();
+            return;
+        };
+        let theme = match payload.get("theme") {
+            Some(value) if value.is_null() => None,
+            Some(value) => value.as_str().map(str::to_owned),
+            None => None,
+        };
+        if !(50..=300).contains(&scale) || payload.len() != 3 {
+            reject_bridge_message();
+            return;
+        }
+        if let Ok(mut queue) = preferences.lock() {
+            queue.clear();
+            queue.push(PreferencesMessage {
+                use_zed,
+                theme,
+                scale: scale as u16,
+            });
+            ACCEPTED_BRIDGE_MESSAGES.fetch_add(1, Ordering::Relaxed);
+        } else {
+            reject_bridge_message();
+        }
+        return;
+    }
     let accepted = (message.len() <= MAX_FRAME_BYTES)
         .then_some(message.as_bytes())
         .and_then(|bytes| canonical_bridge_message(bytes).ok())
@@ -753,6 +658,7 @@ pub struct EmbeddedWebView {
     parent: id,
     view: WebView,
     router: Arc<Mutex<BridgeRouter>>,
+    preference_messages: Arc<Mutex<Vec<PreferencesMessage>>>,
     current_generation: DocumentGeneration,
     #[allow(dead_code)]
     appearance_generation: AppearanceGeneration,
@@ -877,6 +783,42 @@ impl EmbeddedWebView {
             .map_or_else(|_| Vec::new(), |mut router| router.drain())
     }
 
+    pub(crate) fn drain_preferences(&self) -> Vec<PreferencesMessage> {
+        self.preference_messages
+            .lock()
+            .map_or_else(|_| Vec::new(), |mut queue| queue.drain(..).collect())
+    }
+
+    pub fn set_preferences(
+        &self,
+        preferences: &PreferencesMessage,
+        themes: &[Option<String>],
+        dark: bool,
+        background: &str,
+        foreground: &str,
+        control: &str,
+    ) {
+        let theme = serde_json::to_string(&preferences.theme).unwrap_or_else(|_| "null".into());
+        let themes = serde_json::to_string(themes).unwrap_or_else(|_| "[]".into());
+        let background = serde_json::to_string(background).unwrap();
+        let foreground = serde_json::to_string(foreground).unwrap();
+        let control = serde_json::to_string(control).unwrap();
+        evaluate_javascript(
+            &self.view,
+            &format!(
+                "window.mdvrSetPreferences?.({}, {}, {}, {}, {}, {}, {}, {});",
+                preferences.use_zed,
+                theme,
+                preferences.scale,
+                themes,
+                dark,
+                background,
+                foreground,
+                control
+            ),
+        );
+    }
+
     pub fn sync_frame(&self, top_inset: f64) {
         assert!(main_thread(), "Wry WebView must be used on main thread");
         unsafe {
@@ -893,6 +835,14 @@ impl EmbeddedWebView {
     }
 
     pub fn attach(window: &Window, top_inset: f64) -> Option<Self> {
+        Self::attach_url(window, top_inset, "mdvr://localhost/index.html")
+    }
+
+    pub fn attach_preferences(window: &Window) -> Option<Self> {
+        Self::attach_url(window, 0.0, "mdvr://localhost/index.html?preferences")
+    }
+
+    fn attach_url(window: &Window, top_inset: f64, url: &str) -> Option<Self> {
         if !main_thread() {
             return None;
         }
@@ -909,6 +859,8 @@ impl EmbeddedWebView {
         let page_loaded_callback = page_loaded.clone();
         let router = Arc::new(Mutex::new(BridgeRouter::new(BridgeContext::default())));
         let ipc_router = router.clone();
+        let preference_messages = Arc::new(Mutex::new(Vec::new()));
+        let ipc_preferences = preference_messages.clone();
         let protocol_root = root.clone();
         let view = WebViewBuilder::new()
             .with_custom_protocol("mdvr".into(), move |_id, request: Request<Vec<u8>>| {
@@ -928,16 +880,19 @@ impl EmbeddedWebView {
                         .map(Into::into),
                 }
             })
-            .with_ipc_handler(move |request| receive_bridge_message(&ipc_router, request.body()))
+            .with_ipc_handler(move |request| {
+                receive_bridge_message(&ipc_router, &ipc_preferences, request.body())
+            })
             .with_on_page_load_handler(move |event, url| {
-                if matches!(event, PageLoadEvent::Finished) && url == "mdvr://localhost/index.html"
+                if matches!(event, PageLoadEvent::Finished)
+                    && url.starts_with("mdvr://localhost/index.html")
                 {
                     page_loaded_callback.store(true, Ordering::Release);
                 }
             })
             .with_incognito(true)
             .with_navigation_handler(navigation_allowed_url)
-            .with_url("mdvr://localhost/index.html")
+            .with_url(url)
             .with_bounds(Rect {
                 position: wry::dpi::LogicalPosition::new(0.0, top_inset).into(),
                 size: wry::dpi::LogicalSize::new(
@@ -952,6 +907,7 @@ impl EmbeddedWebView {
             parent,
             view,
             router,
+            preference_messages,
             current_generation: DocumentGeneration::default(),
             appearance_generation: AppearanceGeneration::default(),
             pending_state: Box::new(PendingPageState::default()),
