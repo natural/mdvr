@@ -55,7 +55,7 @@ use crate::{
     },
     navigation::{LoadRequest, Locator, NavigationAction, NavigationState},
     platform::{
-        EmbeddedWebView, PreferencesMessage, begin_window_drag,
+        EmbeddedWebView, NativePreferencesControls, begin_window_drag,
         bridge::{BridgeContext, BridgeMessage},
         confirm_large_document, confirm_outside_resource, confirm_remote_images, file_url_path,
         install_close_shortcut, open_external_url, open_local_file, perform_redo, perform_undo,
@@ -346,7 +346,6 @@ impl gpui::Global for SharedPreferences {}
 
 #[derive(Clone, Copy)]
 struct UiPalette {
-    dark: bool,
     background: Rgba,
     foreground: Rgba,
     control: Rgba,
@@ -402,7 +401,6 @@ fn ui_palette(preferences: &Preferences, shared: &SharedPreferences, window: &Wi
     let background = theme_color(&tokens.reader_background, 0x202124);
     let accent = theme_color(&tokens.accent, 0x7aa2f7);
     UiPalette {
-        dark: mode == AppearanceMode::Dark,
         background,
         foreground: theme_color(&tokens.reader_foreground, 0xf1f3f4),
         control: theme_color(&tokens.code_background, 0x3c4043),
@@ -2069,8 +2067,7 @@ impl Render for MdvrView {
 
 struct PreferencesView {
     preferences: Preferences,
-    web_view: EmbeddedWebView,
-    themes: Vec<Option<String>>,
+    controls: NativePreferencesControls,
     #[allow(dead_code)]
     preferences_subscription: Subscription,
     #[allow(dead_code)]
@@ -2079,12 +2076,12 @@ struct PreferencesView {
 
 impl PreferencesView {
     fn poll(&mut self, cx: &mut Context<Self>) {
-        for message in self.web_view.drain_preferences() {
-            self.preferences.theme = message.theme;
-            let _ = self.preferences.set_text_scale(message.scale);
+        let (theme, scale) = self.controls.values();
+        if theme != self.preferences.theme || scale != self.preferences.text_scale_percent {
+            self.preferences.theme = theme;
+            let _ = self.preferences.set_text_scale(scale);
             publish_preferences(cx, &self.preferences);
         }
-        self.web_view.flush_pending();
         cx.notify();
     }
 }
@@ -2093,40 +2090,13 @@ impl Render for PreferencesView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_window_title("Preferences");
         let shared = cx.global::<SharedPreferences>();
-        let palette = ui_palette(&self.preferences, shared, window);
-        set_window_appearance(
-            window,
-            self.preferences.theme.is_some().then_some(palette.dark),
-        );
-        self.web_view
-            .set_theme_css(theme_css(self.preferences.theme.as_deref()));
-        self.web_view.set_preferences(
-            &PreferencesMessage {
-                theme: self.preferences.theme.clone(),
-                scale: self.preferences.text_scale_percent,
-            },
-            &self.themes,
-            palette.dark,
-            &format!(
-                "#{:02x}{:02x}{:02x}",
-                (palette.background.r * 255.0) as u8,
-                (palette.background.g * 255.0) as u8,
-                (palette.background.b * 255.0) as u8
-            ),
-            &format!(
-                "#{:02x}{:02x}{:02x}",
-                (palette.foreground.r * 255.0) as u8,
-                (palette.foreground.g * 255.0) as u8,
-                (palette.foreground.b * 255.0) as u8
-            ),
-            &format!(
-                "#{:02x}{:02x}{:02x}",
-                (palette.control.r * 255.0) as u8,
-                (palette.control.g * 255.0) as u8,
-                (palette.control.b * 255.0) as u8
-            ),
-        );
-        self.web_view.sync_frame(0.0);
+        let dark = self
+            .preferences
+            .theme
+            .as_deref()
+            .and_then(|name| shared.theme_family.member(name))
+            .map(|theme| theme.tokens.mode == AppearanceMode::Dark);
+        set_window_appearance(window, dark);
         div().size_full()
     }
 }
@@ -2264,7 +2234,7 @@ fn show_preferences(_: &ShowPreferences, cx: &mut App) {
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
                 origin: point(px(300.0), px(200.0)),
-                size: size(px(430.0), px(250.0)),
+                size: size(px(460.0), px(390.0)),
             })),
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("Preferences".into()),
@@ -2275,19 +2245,32 @@ fn show_preferences(_: &ShowPreferences, cx: &mut App) {
             ..WindowOptions::default()
         },
         move |window, cx| {
-            let mut web_view =
-                EmbeddedWebView::attach_preferences(window).expect("preferences web view");
-            web_view.load_initial_document();
+            let dark = preferences
+                .theme
+                .as_deref()
+                .and_then(|name| shared.theme_family.member(name))
+                .map(|theme| theme.tokens.mode == AppearanceMode::Dark);
+            set_window_appearance(window, dark);
+            let controls = NativePreferencesControls::attach(
+                window,
+                preferences.theme.as_deref(),
+                preferences.text_scale_percent,
+                themes.clone(),
+            )
+            .expect("native preferences controls");
             let view = cx.new(|cx| {
                 let preferences_subscription =
                     cx.observe_global::<SharedPreferences>(|view: &mut PreferencesView, cx| {
                         view.preferences = cx.global::<SharedPreferences>().preferences.clone();
+                        view.controls.sync(
+                            view.preferences.theme.as_deref(),
+                            view.preferences.text_scale_percent,
+                        );
                         cx.notify();
                     });
                 PreferencesView {
                     preferences,
-                    web_view,
-                    themes,
+                    controls,
                     preferences_subscription,
                     poll_task: None,
                 }

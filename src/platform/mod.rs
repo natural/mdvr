@@ -30,8 +30,8 @@ use crate::{
 use block2::RcBlock;
 use cocoa::{
     appkit::{NSEventMask, NSEventModifierFlags, NSView},
-    base::{BOOL, id, nil},
-    foundation::NSString,
+    base::{BOOL, NO, YES, id, nil},
+    foundation::{NSPoint, NSRect, NSSize, NSString},
 };
 use gpui::Window;
 use objc::{class, msg_send, sel, sel_impl};
@@ -71,7 +71,7 @@ fn resolve_web_asset_root(executable: &Path, development_root: &Path) -> Option<
 }
 
 fn navigation_allowed_url(url: String) -> bool {
-    url == "mdvr://localhost/index.html" || url == "mdvr://localhost/index.html?preferences"
+    url == "mdvr://localhost/index.html"
 }
 
 fn asset_path(root: &Path, relative: &str) -> Option<PathBuf> {
@@ -152,10 +152,180 @@ pub(crate) fn install_close_shortcut() {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct PreferencesMessage {
-    pub theme: Option<String>,
-    pub scale: u16,
+pub(crate) struct NativePreferencesControls {
+    container: id,
+    theme: id,
+    scale: id,
+    scale_label: id,
+    themes: Vec<Option<String>>,
+}
+
+impl NativePreferencesControls {
+    pub(crate) fn attach(
+        window: &Window,
+        theme: Option<&str>,
+        scale: u16,
+        themes: Vec<Option<String>>,
+    ) -> Option<Self> {
+        let handle = HasWindowHandle::window_handle(window).ok()?;
+        let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+            return None;
+        };
+        unsafe {
+            let native_view = handle.ns_view.as_ptr() as id;
+            let frame: NSRect = msg_send![native_view, bounds];
+            let container: id = msg_send![class!(NSView), alloc];
+            let container: id = msg_send![container, initWithFrame: frame];
+            let _: () = msg_send![container, setAutoresizingMask: 18_u64];
+            let _: () = msg_send![native_view, addSubview: container];
+
+            let label = |text: &str, frame: NSRect, parent: id| {
+                let value = NSString::alloc(nil).init_str(text);
+                let control: id = msg_send![class!(NSTextField), labelWithString: value];
+                let _: () = msg_send![control, setFrame: frame];
+                let _: () = msg_send![parent, addSubview: control];
+                let _: () = msg_send![value, release];
+                control
+            };
+            let appearance_view: id = msg_send![class!(NSView), alloc];
+            let appearance_view: id =
+                msg_send![appearance_view, initWithFrame: rect(0., 0., 408., 182.)];
+            label("Theme", rect(16., 132., 80., 22.), appearance_view);
+            label("Text size", rect(16., 91., 80., 22.), appearance_view);
+
+            let theme_control: id = msg_send![class!(NSPopUpButton), alloc];
+            let theme_control: id =
+                msg_send![theme_control, initWithFrame: rect(96., 128., 280., 30.) pullsDown: NO];
+            for name in &themes {
+                let title = NSString::alloc(nil).init_str(match name.as_deref() {
+                    None => "System",
+                    Some(value) => value,
+                });
+                let _: () = msg_send![theme_control, addItemWithTitle: title];
+                let _: () = msg_send![title, release];
+            }
+            let selected = themes
+                .iter()
+                .position(|value| value.as_deref() == theme)
+                .unwrap_or(0);
+            let _: () = msg_send![theme_control, selectItemAtIndex: selected as isize];
+            let _: () = msg_send![appearance_view, addSubview: theme_control];
+
+            let slider: id = msg_send![class!(NSSlider), alloc];
+            let slider: id = msg_send![slider, initWithFrame: rect(96., 86., 220., 28.)];
+            let _: () = msg_send![slider, setMinValue: 50_f64];
+            let _: () = msg_send![slider, setMaxValue: 300_f64];
+            let _: () = msg_send![slider, setDoubleValue: f64::from(scale)];
+            let _: () = msg_send![slider, setContinuous: YES];
+            let _: () = msg_send![appearance_view, addSubview: slider];
+            let scale_label = label(
+                &format!("{scale}%"),
+                rect(326., 91., 56., 22.),
+                appearance_view,
+            );
+
+            let tabs: id = msg_send![class!(NSTabView), alloc];
+            let tabs: id = msg_send![tabs, initWithFrame: rect(16., 16., 408., 182.)];
+            let appearance_tab = tab_item("Appearance", appearance_view);
+            let editor_view: id = msg_send![class!(NSView), alloc];
+            let editor_view: id = msg_send![editor_view, initWithFrame: rect(0., 0., 408., 182.)];
+            label("Font", rect(16., 132., 80., 22.), editor_view);
+            let search: id = msg_send![class!(NSSearchField), alloc];
+            let search: id = msg_send![search, initWithFrame: rect(96., 128., 280., 28.)];
+            let _: () = msg_send![search, setPlaceholderString: NSString::alloc(nil).init_str("Search fonts")];
+            let _: () = msg_send![editor_view, addSubview: search];
+            label("Font family", rect(16., 96., 80., 22.), editor_view);
+            let font: id = msg_send![class!(NSTextField), alloc];
+            let font: id = msg_send![font, initWithFrame: rect(96., 92., 280., 28.)];
+            let _: () =
+                msg_send![font, setPlaceholderString: NSString::alloc(nil).init_str("System font")];
+            let _: () = msg_send![editor_view, addSubview: font];
+            label("Colors", rect(16., 62., 80., 22.), editor_view);
+            for (x, label_text) in [(96., "Background"), (190., "Text"), (284., "Accent")] {
+                label(label_text, rect(x, 62., 80., 18.), editor_view);
+                let well: id = msg_send![class!(NSColorWell), alloc];
+                let well: id = msg_send![well, initWithFrame: rect(x, 34., 80., 28.)];
+                let _: () = msg_send![well, setToolTip: NSString::alloc(nil).init_str(label_text)];
+                let _: () = msg_send![editor_view, addSubview: well];
+            }
+            for (x, title) in [(16., "Bold"), (110., "Italic"), (204., "Underline")] {
+                let check: id = msg_send![class!(NSButton), alloc];
+                let check: id = msg_send![check, initWithFrame: rect(x, 4., 90., 28.)];
+                let title = NSString::alloc(nil).init_str(title);
+                let _: () = msg_send![check, setButtonType: 3_u64];
+                let _: () = msg_send![check, setTitle: title];
+                let _: () = msg_send![editor_view, addSubview: check];
+                let _: () = msg_send![title, release];
+            }
+            let editor_tab = tab_item("Theme Editor", editor_view);
+            let _: () = msg_send![tabs, addTabViewItem: appearance_tab];
+            let _: () = msg_send![tabs, addTabViewItem: editor_tab];
+            let _: () = msg_send![tabs, selectTabViewItemAtIndex: 0_isize];
+            let _: () = msg_send![container, addSubview: tabs];
+            Some(Self {
+                container,
+                theme: theme_control,
+                scale: slider,
+                scale_label,
+                themes,
+            })
+        }
+    }
+
+    pub(crate) fn sync(&self, theme: Option<&str>, scale: u16) {
+        unsafe {
+            if let Some(selected) = self
+                .themes
+                .iter()
+                .position(|value| value.as_deref() == theme)
+            {
+                let _: () = msg_send![self.theme, selectItemAtIndex: selected as isize];
+            }
+            let _: () = msg_send![self.scale, setDoubleValue: f64::from(scale)];
+        }
+    }
+
+    pub(crate) fn values(&self) -> (Option<String>, u16) {
+        unsafe {
+            let selected: isize = msg_send![self.theme, indexOfSelectedItem];
+            let scale: f64 = msg_send![self.scale, doubleValue];
+            let scale = scale.round().clamp(50., 300.) as u16;
+            let value = NSString::alloc(nil).init_str(&format!("{scale}%"));
+            let _: () = msg_send![self.scale_label, setStringValue: value];
+            let _: () = msg_send![value, release];
+            (
+                usize::try_from(selected)
+                    .ok()
+                    .and_then(|index| self.themes.get(index))
+                    .cloned()
+                    .flatten(),
+                scale,
+            )
+        }
+    }
+}
+
+impl Drop for NativePreferencesControls {
+    fn drop(&mut self) {
+        unsafe {
+            let _: () = msg_send![self.container, removeFromSuperview];
+            let _: () = msg_send![self.container, release];
+        }
+    }
+}
+
+fn rect(x: f64, y: f64, width: f64, height: f64) -> NSRect {
+    NSRect::new(NSPoint::new(x, y), NSSize::new(width, height))
+}
+
+fn tab_item(title: &str, view: id) -> id {
+    unsafe {
+        let item: id = msg_send![class!(NSTabViewItem), alloc];
+        let item: id = msg_send![item, initWithIdentifier: NSString::alloc(nil).init_str(title)];
+        let _: () = msg_send![item, setLabel: NSString::alloc(nil).init_str(title)];
+        let _: () = msg_send![item, setView: view];
+        item
+    }
 }
 
 pub(crate) fn set_window_background_draggable(window: &Window, draggable: bool) {
@@ -388,43 +558,7 @@ pub(crate) fn open_external_url(url: &str) -> bool {
     }
 }
 
-fn receive_bridge_message(
-    router: &Mutex<BridgeRouter>,
-    preferences: &Mutex<Vec<PreferencesMessage>>,
-    message: &str,
-) {
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(message)
-        && value.get("kind").and_then(serde_json::Value::as_str) == Some("preferences")
-    {
-        let Some(payload) = value.get("payload").and_then(serde_json::Value::as_object) else {
-            reject_bridge_message();
-            return;
-        };
-        let Some(scale) = payload.get("scale").and_then(serde_json::Value::as_u64) else {
-            reject_bridge_message();
-            return;
-        };
-        let theme = match payload.get("theme") {
-            Some(value) if value.is_null() => None,
-            Some(value) => value.as_str().map(str::to_owned),
-            None => None,
-        };
-        if !(50..=300).contains(&scale) || payload.len() != 2 {
-            reject_bridge_message();
-            return;
-        }
-        if let Ok(mut queue) = preferences.lock() {
-            queue.clear();
-            queue.push(PreferencesMessage {
-                theme,
-                scale: scale as u16,
-            });
-            ACCEPTED_BRIDGE_MESSAGES.fetch_add(1, Ordering::Relaxed);
-        } else {
-            reject_bridge_message();
-        }
-        return;
-    }
+fn receive_bridge_message(router: &Mutex<BridgeRouter>, message: &str) {
     let accepted = (message.len() <= MAX_FRAME_BYTES)
         .then_some(message.as_bytes())
         .and_then(|bytes| canonical_bridge_message(bytes).ok())
@@ -651,7 +785,6 @@ pub struct EmbeddedWebView {
     parent: id,
     view: WebView,
     router: Arc<Mutex<BridgeRouter>>,
-    preference_messages: Arc<Mutex<Vec<PreferencesMessage>>>,
     current_generation: DocumentGeneration,
     #[allow(dead_code)]
     appearance_generation: AppearanceGeneration,
@@ -773,35 +906,6 @@ impl EmbeddedWebView {
             .map_or_else(|_| Vec::new(), |mut router| router.drain())
     }
 
-    pub(crate) fn drain_preferences(&self) -> Vec<PreferencesMessage> {
-        self.preference_messages
-            .lock()
-            .map_or_else(|_| Vec::new(), |mut queue| queue.drain(..).collect())
-    }
-
-    pub fn set_preferences(
-        &self,
-        preferences: &PreferencesMessage,
-        themes: &[Option<String>],
-        dark: bool,
-        background: &str,
-        foreground: &str,
-        control: &str,
-    ) {
-        let theme = serde_json::to_string(&preferences.theme).unwrap_or_else(|_| "null".into());
-        let themes = serde_json::to_string(themes).unwrap_or_else(|_| "[]".into());
-        let background = serde_json::to_string(background).unwrap();
-        let foreground = serde_json::to_string(foreground).unwrap();
-        let control = serde_json::to_string(control).unwrap();
-        evaluate_javascript(
-            &self.view,
-            &format!(
-                "window.mdvrSetPreferences?.({}, {}, {}, {}, {}, {}, {});",
-                theme, preferences.scale, themes, dark, background, foreground, control
-            ),
-        );
-    }
-
     pub fn sync_frame(&self, top_inset: f64) {
         assert!(main_thread(), "Wry WebView must be used on main thread");
         unsafe {
@@ -821,10 +925,6 @@ impl EmbeddedWebView {
         Self::attach_url(window, top_inset, "mdvr://localhost/index.html")
     }
 
-    pub fn attach_preferences(window: &Window) -> Option<Self> {
-        Self::attach_url(window, 0.0, "mdvr://localhost/index.html?preferences")
-    }
-
     fn attach_url(window: &Window, top_inset: f64, url: &str) -> Option<Self> {
         if !main_thread() {
             return None;
@@ -842,8 +942,6 @@ impl EmbeddedWebView {
         let page_loaded_callback = page_loaded.clone();
         let router = Arc::new(Mutex::new(BridgeRouter::new(BridgeContext::default())));
         let ipc_router = router.clone();
-        let preference_messages = Arc::new(Mutex::new(Vec::new()));
-        let ipc_preferences = preference_messages.clone();
         let protocol_root = root.clone();
         let view = WebViewBuilder::new()
             .with_custom_protocol("mdvr".into(), move |_id, request: Request<Vec<u8>>| {
@@ -863,9 +961,7 @@ impl EmbeddedWebView {
                         .map(Into::into),
                 }
             })
-            .with_ipc_handler(move |request| {
-                receive_bridge_message(&ipc_router, &ipc_preferences, request.body())
-            })
+            .with_ipc_handler(move |request| receive_bridge_message(&ipc_router, request.body()))
             .with_on_page_load_handler(move |event, url| {
                 if matches!(event, PageLoadEvent::Finished)
                     && url.starts_with("mdvr://localhost/index.html")
@@ -890,7 +986,6 @@ impl EmbeddedWebView {
             parent,
             view,
             router,
-            preference_messages,
             current_generation: DocumentGeneration::default(),
             appearance_generation: AppearanceGeneration::default(),
             pending_state: Box::new(PendingPageState::default()),
