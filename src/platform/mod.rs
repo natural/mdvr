@@ -26,7 +26,6 @@ use crate::{
         MAX_FRAME_BYTES, Message, ResourceResult, decode, encode,
     },
     platform::bridge::{BridgeContext, BridgeMessage, BridgeRouter},
-    theme::ZedFonts,
 };
 use block2::RcBlock;
 use cocoa::{
@@ -155,7 +154,6 @@ pub(crate) fn install_close_shortcut() {
 
 #[derive(Clone, Debug)]
 pub(crate) struct PreferencesMessage {
-    pub use_zed: bool,
     pub theme: Option<String>,
     pub scale: u16,
 }
@@ -402,10 +400,6 @@ fn receive_bridge_message(
             reject_bridge_message();
             return;
         };
-        let Some(use_zed) = payload.get("use_zed").and_then(serde_json::Value::as_bool) else {
-            reject_bridge_message();
-            return;
-        };
         let Some(scale) = payload.get("scale").and_then(serde_json::Value::as_u64) else {
             reject_bridge_message();
             return;
@@ -415,14 +409,13 @@ fn receive_bridge_message(
             Some(value) => value.as_str().map(str::to_owned),
             None => None,
         };
-        if !(50..=300).contains(&scale) || payload.len() != 3 {
+        if !(50..=300).contains(&scale) || payload.len() != 2 {
             reject_bridge_message();
             return;
         }
         if let Ok(mut queue) = preferences.lock() {
             queue.clear();
             queue.push(PreferencesMessage {
-                use_zed,
                 theme,
                 scale: scale as u16,
             });
@@ -484,8 +477,8 @@ struct PendingPage {
     appearance: Option<PendingAppearance>,
     context: Option<PendingContext>,
     theme_choices: Option<String>,
+    theme_css: Option<String>,
     locator: Option<PendingLocator>,
-    fonts: Option<String>,
 }
 
 #[derive(Default)]
@@ -497,8 +490,8 @@ struct PendingPageState {
     appearance: Option<PendingAppearance>,
     context: Option<PendingContext>,
     theme_choices: Option<String>,
+    theme_css: Option<String>,
     locator: Option<PendingLocator>,
-    fonts: Option<String>,
 }
 
 impl PendingPageState {
@@ -510,8 +503,8 @@ impl PendingPageState {
         self.appearance = None;
         self.context = None;
         self.theme_choices = None;
+        self.theme_css = None;
         self.locator = None;
-        self.fonts = None;
     }
 
     fn page_ready(&self) -> bool {
@@ -613,8 +606,8 @@ impl PendingPageState {
             appearance: self.appearance.take(),
             context: self.context.take(),
             theme_choices: self.theme_choices.take(),
+            theme_css: self.theme_css.take(),
             locator: self.locator.take(),
-            fonts: self.fonts.take(),
         }
     }
 
@@ -630,7 +623,7 @@ impl PendingPageState {
         if let Some(script) = pending.theme_choices {
             evaluate_javascript(web_view, &script);
         }
-        if let Some(script) = pending.fonts {
+        if let Some(script) = pending.theme_css {
             evaluate_javascript(web_view, &script);
         }
         if let Some(appearance) = pending.appearance {
@@ -750,13 +743,10 @@ fn locator_script(locator: &Locator) -> Result<String, serde_json::Error> {
     ))
 }
 
-fn fonts_script(fonts: &ZedFonts) -> Result<String, serde_json::Error> {
+fn theme_css_script(css: Option<&str>) -> Result<String, serde_json::Error> {
     Ok(format!(
-        "window.mdvrSetFonts({},{},{},{});",
-        serde_json::to_string(&fonts.ui_family)?,
-        serde_json::to_string(&fonts.buffer_family)?,
-        serde_json::to_string(&fonts.ui_size)?,
-        serde_json::to_string(&fonts.buffer_size)?,
+        "window.mdvrSetThemeCss({});",
+        serde_json::to_string(&css)?
     ))
 }
 
@@ -806,15 +796,8 @@ impl EmbeddedWebView {
         evaluate_javascript(
             &self.view,
             &format!(
-                "window.mdvrSetPreferences?.({}, {}, {}, {}, {}, {}, {}, {});",
-                preferences.use_zed,
-                theme,
-                preferences.scale,
-                themes,
-                dark,
-                background,
-                foreground,
-                control
+                "window.mdvrSetPreferences?.({}, {}, {}, {}, {}, {}, {});",
+                theme, preferences.scale, themes, dark, background, foreground, control
             ),
         );
     }
@@ -1039,15 +1022,15 @@ impl EmbeddedWebView {
         }
     }
 
-    pub fn set_fonts(&mut self, fonts: &ZedFonts) {
+    pub fn set_theme_css(&mut self, css: Option<&str>) {
         assert!(main_thread(), "Wry WebView must be used on main thread");
-        let Ok(script) = fonts_script(fonts) else {
+        let Ok(script) = theme_css_script(css) else {
             return;
         };
         if self.pending_state.page_ready() {
             evaluate_javascript(&self.view, &script);
         } else {
-            self.pending_state.fonts = Some(script);
+            self.pending_state.theme_css = Some(script);
         }
     }
 

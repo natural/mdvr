@@ -22,7 +22,6 @@ final class RendererProbe: NSObject, WKNavigationDelegate {
                 getSelection().removeAllRanges();
                 getSelection().addRange(range);
                 window.mdvrLoadDocument('# Inserted\\n\\n' + source, 2);
-                window.mdvrSetFonts('monospace', 'monospace', 19, 17);
                 window.mdvrApplyAppearance({
                     mode: 'dark', scale_percent: 100,
                     reader_background: '#1a1b26', reader_foreground: '#c0caf5',

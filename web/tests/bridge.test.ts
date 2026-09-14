@@ -76,10 +76,7 @@ test("renderer contains no titlebar toolbar", () => {
   expect(html).not.toContain("window.mdvrSetToolbarIcons");
 });
 
-test("Zed fonts reset cleanly and style headings", () => {
-  expect(html).toContain("window.mdvrSetFonts");
-  expect(html).toContain('uiFamily || "system-ui"');
-  expect(html).toContain('codeFamily || "ui-monospace"');
+test("reader fonts and headings use stable defaults", () => {
   expect(readerCss).toContain("color: var(--reader-accent)");
   expect(readerCss).toContain("font-family: var(--reader-ui-font)");
 });

@@ -1,0 +1,139 @@
+:root {
+  color-scheme: light;
+  --reader-background: #e6e7ed;
+  --reader-text: #3760bf;
+  --reader-muted: #6172b0;
+  --reader-code: #d5d6db;
+  --reader-accent: #2e7de9;
+  --reader-focus: #2e7de9;
+}
+
+html,
+body {
+  background: #e6e7ed;
+  color: #3760bf;
+}
+.reader {
+  background: #e6e7ed;
+  color: #3760bf;
+}
+.reader p {
+  margin: 1em 0;
+}
+.reader h1,
+.reader h2,
+.reader h3,
+.reader h4,
+.reader h5,
+.reader h6 {
+  color: #2e7de9;
+  font-weight: 700;
+}
+.reader h1 {
+  font-size: 2em;
+}
+.reader h2 {
+  font-size: 1.5em;
+}
+.reader h3 {
+  font-size: 1.25em;
+}
+.reader h4 {
+  font-size: 1.1em;
+}
+.reader h5 {
+  font-size: 1em;
+}
+.reader h6 {
+  font-size: 0.9em;
+}
+.reader hr {
+  border: 0;
+  border-top: 2px solid #a8aec4;
+  margin: 2em 0;
+}
+.reader blockquote {
+  margin: 1em 0;
+  padding: 0.25em 1em;
+  border-left: 4px solid #2e7de9;
+  color: #6172b0;
+  background: #d5d6db;
+}
+.reader ul,
+.reader ol {
+  padding-left: 2em;
+}
+.reader li {
+  margin: 0.25em 0;
+}
+.reader li > p {
+  margin: 0.5em 0;
+}
+.reader li > p:first-child {
+  margin-top: 0;
+}
+.reader pre {
+  color: #3760bf;
+  background: #d5d6db;
+  border: 1px solid #a8aec4;
+  border-radius: 0.4rem;
+}
+.reader code {
+  color: #9854f1;
+  background: #d0d1d7;
+  border-radius: 0.2rem;
+  padding: 0.1em 0.3em;
+}
+.reader pre code {
+  background: transparent;
+  padding: 0;
+}
+.reader em {
+  font-style: italic;
+}
+.reader strong {
+  font-weight: 700;
+}
+.reader a {
+  color: #2e7de9;
+  text-decoration: underline;
+}
+.reader a:hover {
+  color: #9854f1;
+}
+.reader img {
+  max-width: 100%;
+  border: 1px solid #a8aec4;
+  border-radius: 0.35rem;
+}
+.reader :focus-visible,
+#search :focus-visible,
+#palette :focus-visible {
+  outline: 2px solid #2e7de9;
+  outline-offset: 2px;
+}
+#search,
+#outline,
+#palette,
+#status {
+  background: #e6e7ed;
+  color: #3760bf;
+  border-color: #a8aec4;
+}
+#search button,
+#palette button,
+#status button {
+  color: #3760bf;
+  background: #d5d6db;
+  border: 1px solid #a8aec4;
+}
+#document.preferences {
+  background: #e6e7ed;
+  color: #3760bf;
+}
+#document.preferences select,
+#document.preferences input {
+  color: #3760bf;
+  background: #d5d6db;
+  border-color: #a8aec4;
+}

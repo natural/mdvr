@@ -12,10 +12,9 @@ use std::{
 };
 
 use gpui::{
-    App, Application, Bounds, Context, FocusHandle, FontWeight, KeyDownEvent, Menu, MenuItem,
-    MouseButton, OsAction, PathPromptOptions, Render, Rgba, Subscription, SystemMenuType, Task,
-    Timer, Window, WindowAppearance, WindowBounds, WindowOptions, actions, div, point, prelude::*,
-    px, size,
+    App, Application, Bounds, Context, FocusHandle, KeyDownEvent, Menu, MenuItem, MouseButton,
+    OsAction, PathPromptOptions, Render, Rgba, Subscription, SystemMenuType, Task, Timer, Window,
+    WindowAppearance, WindowBounds, WindowOptions, actions, div, point, prelude::*, px, size,
 };
 
 actions!(
@@ -70,10 +69,7 @@ use crate::{
         DisplayBounds, LaunchIntent, Preferences, ReadingLocator, WindowGeometry,
         conventional_path, load_or_default, resolve_launch, save,
     },
-    theme::{
-        AppearanceMode, Theme, ThemeFamily, ZedFonts, available_family, default_theme, import_file,
-        load_zed_config,
-    },
+    theme::{AppearanceMode, ThemeFamily, default_family, default_theme, import_file},
     ui::{FocusOwner, ShellCommand, ShellState},
 };
 
@@ -85,22 +81,6 @@ struct OpenRequest {
 
 static OPEN_PATHS: OnceLock<Mutex<VecDeque<OpenRequest>>> = OnceLock::new();
 const MAIN_TITLEBAR_HEIGHT: f64 = 38.0;
-
-fn ui_font_weight(value: &str) -> Option<FontWeight> {
-    Some(match value.to_ascii_lowercase().as_str() {
-        "thin" => FontWeight::THIN,
-        "extra_light" | "extralight" => FontWeight::EXTRA_LIGHT,
-        "light" => FontWeight::LIGHT,
-        "normal" | "regular" => FontWeight::NORMAL,
-        "medium" => FontWeight::MEDIUM,
-        "semibold" | "semi_bold" => FontWeight::SEMIBOLD,
-        "bold" => FontWeight::BOLD,
-        "extra_bold" | "extrabold" => FontWeight::EXTRA_BOLD,
-        "black" => FontWeight::BLACK,
-        value if value.parse::<f32>().is_ok() => FontWeight(value.parse().ok()?),
-        _ => return None,
-    })
-}
 
 fn main_window_frame(titlebar: gpui::AnyElement, content: gpui::AnyElement) -> gpui::AnyElement {
     div()
@@ -334,16 +314,11 @@ fn dispatch_bridge_action(
 struct SharedPreferences {
     preferences: Preferences,
     theme_family: ThemeFamily,
-    zed_theme: Option<Theme>,
-    zed_fonts: Option<ZedFonts>,
 }
 
 impl SharedPreferences {
     fn new(preferences: Preferences) -> Self {
-        let zed = preferences.use_zed_config.then(load_zed_config).flatten();
-        let zed_theme = zed.as_ref().and_then(|config| config.theme.clone());
-        let zed_fonts = zed.map(|config| config.fonts);
-        let mut theme_family = available_family();
+        let mut theme_family = default_family();
         if let Some(imported) = preferences
             .theme_file
             .as_deref()
@@ -363,8 +338,6 @@ impl SharedPreferences {
         Self {
             preferences,
             theme_family,
-            zed_theme,
-            zed_fonts,
         }
     }
 }
@@ -381,6 +354,20 @@ struct UiPalette {
     selection: Rgba,
 }
 
+fn theme_css(name: Option<&str>) -> Option<&'static str> {
+    match name {
+        Some("Default Light Theme") => {
+            Some(include_str!("../web/themes/default-light-mode-theme.css"))
+        }
+        Some("Default Dark Theme") => {
+            Some(include_str!("../web/themes/default-dark-mode-theme.css"))
+        }
+        Some("Tokyo Light Theme") => Some(include_str!("../web/themes/tokyo-light-theme.css")),
+        Some("Tokyo Dark Theme") => Some(include_str!("../web/themes/tokyo-dark-theme.css")),
+        _ => None,
+    }
+}
+
 fn theme_color(value: &str, fallback: u32) -> Rgba {
     value
         .strip_prefix('#')
@@ -391,7 +378,7 @@ fn theme_color(value: &str, fallback: u32) -> Rgba {
 
 fn ui_palette(preferences: &Preferences, shared: &SharedPreferences, window: &Window) -> UiPalette {
     let selected = if preferences.theme.is_none() {
-        shared.zed_theme.as_ref()
+        None
     } else {
         preferences
             .theme
@@ -509,8 +496,6 @@ struct MdvrView {
     picker_return: bool,
     startup_error: Option<String>,
     theme_family: Option<ThemeFamily>,
-    zed_theme: Option<Theme>,
-    zed_fonts: Option<ZedFonts>,
     loading_document: bool,
     initial_load_task: Option<Task<()>>,
     navigation_load_task: Option<Task<()>>,
@@ -532,11 +517,6 @@ impl MdvrView {
             if shared.preferences != view.preferences {
                 view.preferences = shared.preferences;
                 view.theme_family = Some(shared.theme_family);
-                view.zed_theme = shared.zed_theme;
-                view.zed_fonts = shared.zed_fonts;
-                if let Some(web_view) = view.web_view.as_mut() {
-                    web_view.set_fonts(view.zed_fonts.as_ref().unwrap_or(&ZedFonts::default()));
-                }
                 view.appearance_mode = None;
                 cx.notify();
             }
@@ -563,8 +543,6 @@ impl MdvrView {
             picker_return: false,
             startup_error: None,
             theme_family: None,
-            zed_theme: None,
-            zed_fonts: None,
             loading_document: false,
             initial_load_task: None,
             navigation_load_task: None,
@@ -626,8 +604,6 @@ impl MdvrView {
         let shared = cx.global::<SharedPreferences>().clone();
         self.preferences = shared.preferences;
         self.theme_family = Some(shared.theme_family);
-        self.zed_theme = shared.zed_theme;
-        self.zed_fonts = shared.zed_fonts;
         self.initialized = true;
         self.shell.text_scale_percent = self.preferences.text_scale_percent;
         self.pending_initial_locator = launch.state.reading_locator.clone();
@@ -1019,7 +995,7 @@ impl MdvrView {
 
     fn update_appearance(&mut self, window: &Window) {
         let selected_theme = if self.preferences.theme.is_none() {
-            self.zed_theme.as_ref()
+            None
         } else {
             self.preferences.theme.as_deref().and_then(|name| {
                 self.theme_family
@@ -1040,12 +1016,17 @@ impl MdvrView {
             },
             |theme| theme.tokens.mode,
         );
+        if let Some(web_view) = self.web_view.as_mut() {
+            web_view.set_theme_css(theme_css(self.preferences.theme.as_deref()));
+        }
         if self.appearance_mode == Some(mode) {
             return;
         }
         set_window_appearance(
             window,
-            (self.preferences.theme.is_some() || self.zed_theme.is_some())
+            self.preferences
+                .theme
+                .is_some()
                 .then_some(mode == AppearanceMode::Dark),
         );
         let Some(generation) = self.bridge_context.generation else {
@@ -1064,7 +1045,6 @@ impl MdvrView {
                 })
                 .unwrap_or_default();
             web_view.set_theme_choices(&names, self.preferences.theme.as_deref());
-            web_view.set_fonts(self.zed_fonts.as_ref().unwrap_or(&ZedFonts::default()));
         }
         let tokens = selected_theme
             .map(|theme| theme.tokens.clone())
@@ -1779,24 +1759,7 @@ impl MdvrView {
             .gap_1()
             .bg(palette.background)
             .text_color(palette.foreground)
-            .font_family(
-                self.zed_fonts
-                    .as_ref()
-                    .and_then(|fonts| fonts.ui_family.clone())
-                    .unwrap_or_else(|| "SF Mono".into()),
-            )
-            .text_size(px(self
-                .zed_fonts
-                .as_ref()
-                .and_then(|fonts| fonts.ui_size)
-                .unwrap_or(12.0)))
-            .when_some(
-                self.zed_fonts
-                    .as_ref()
-                    .and_then(|fonts| fonts.ui_weight.as_deref())
-                    .and_then(ui_font_weight),
-                |bar, weight| bar.font_weight(weight),
-            )
+            .text_xs()
             .border_b_1()
             .border_color(palette.control)
             .child(drag("titlebar-drag-left").w(px(72.0)));
@@ -2117,7 +2080,6 @@ struct PreferencesView {
 impl PreferencesView {
     fn poll(&mut self, cx: &mut Context<Self>) {
         for message in self.web_view.drain_preferences() {
-            self.preferences.use_zed_config = message.use_zed;
             self.preferences.theme = message.theme;
             let _ = self.preferences.set_text_scale(message.scale);
             publish_preferences(cx, &self.preferences);
@@ -2134,12 +2096,12 @@ impl Render for PreferencesView {
         let palette = ui_palette(&self.preferences, shared, window);
         set_window_appearance(
             window,
-            (self.preferences.theme.is_some() || shared.zed_theme.is_some())
-                .then_some(palette.dark),
+            self.preferences.theme.is_some().then_some(palette.dark),
         );
+        self.web_view
+            .set_theme_css(theme_css(self.preferences.theme.as_deref()));
         self.web_view.set_preferences(
             &PreferencesMessage {
-                use_zed: self.preferences.use_zed_config,
                 theme: self.preferences.theme.clone(),
                 scale: self.preferences.text_scale_percent,
             },
@@ -2291,7 +2253,7 @@ fn show_preferences(_: &ShowPreferences, cx: &mut App) {
     }
     let shared = cx.global::<SharedPreferences>().clone();
     let preferences = shared.preferences.clone();
-    let mut themes = vec![None, Some("light".into()), Some("dark".into())];
+    let mut themes = vec![None];
     for theme in &shared.theme_family.members {
         let name = Some(theme.name.clone());
         if !themes.contains(&name) {

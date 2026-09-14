@@ -51,15 +51,18 @@
     <main id="document" class="reader" aria-live="polite" tabindex="0">Loading document…</main>
     <script nonce="mdvr-fixture">
       (() => {
-        window.mdvrSetFonts = (uiFamily, codeFamily, uiSize, codeSize) => {
-          const root = document.documentElement;
-          root.style.setProperty("--reader-ui-font", uiFamily || "system-ui");
-          root.style.setProperty("--reader-code-font", codeFamily || "ui-monospace");
-          root.style.setProperty("--reader-ui-size", Number.isFinite(uiSize) ? `${uiSize}px` : "16px");
-          root.style.setProperty("--reader-code-size", Number.isFinite(codeSize) ? `${codeSize}px` : "0.9em");
+        window.mdvrSetThemeCss = (css) => {
+          let style = document.querySelector('#mdvr-theme');
+          if (!style) {
+            style = document.createElement('style');
+            style.id = 'mdvr-theme';
+            style.nonce = 'mdvr-fixture';
+            document.head.append(style);
+          }
+          style.textContent = typeof css === 'string' ? css : '';
         };
         const preferencesPage = new URLSearchParams(location.search).has('preferences');
-        window.mdvrSetPreferences = (useZed, theme, scale, themes = [], dark = false, background = '#ffffff', foreground = '#222222', control = '#eeeeee') => {
+        window.mdvrSetPreferences = (theme, scale, themes = [], dark = false, background = '#ffffff', foreground = '#222222', control = '#eeeeee') => {
           if (!preferencesPage) return;
           const root = document.querySelector('#document');
           root.className = 'preferences';
@@ -71,8 +74,7 @@
           document.body.style.color = foreground;
           if (root.dataset.preferencesReady === 'true') {
             const active = document.activeElement;
-            if (active?.id !== 'pref-zed' && active?.id !== 'pref-theme' && active?.id !== 'pref-scale') {
-              root.querySelector('#pref-zed').checked = Boolean(useZed);
+            if (active?.id !== 'pref-theme' && active?.id !== 'pref-scale') {
               root.querySelector('#pref-theme').value = theme ?? '';
               root.querySelector('#pref-scale').value = String(scale);
               root.querySelector('#pref-scale-value').textContent = `${scale}%`;
@@ -80,18 +82,15 @@
             return;
           }
           root.dataset.preferencesReady = 'true';
-          root.innerHTML = '<h1>Preferences</h1><form><label><span>Use Zed theme and fonts</span><input id="pref-zed" type="checkbox"></label><label><span>Theme</span><select id="pref-theme"></select></label><label><span>Text size</span><input id="pref-scale" type="range" min="50" max="300" step="1"><output id="pref-scale-value"></output></label></form>';
-          const zed = root.querySelector('#pref-zed');
+          root.innerHTML = '<h1>Preferences</h1><form><label><span>Theme</span><select id="pref-theme"></select></label><label><span>Text size</span><input id="pref-scale" type="range" min="50" max="300" step="1"><output id="pref-scale-value"></output></label></form>';
           const select = root.querySelector('#pref-theme');
           const slider = root.querySelector('#pref-scale');
           const output = root.querySelector('#pref-scale-value');
-          zed.checked = Boolean(useZed);
           select.replaceChildren(...themes.map(value => { const option = document.createElement('option'); option.value = value ?? ''; option.textContent = value === null ? 'System' : value === 'light' ? 'Light' : value === 'dark' ? 'Dark' : value; return option; }));
           select.value = theme ?? '';
           slider.value = String(scale);
           output.textContent = `${scale}%`;
-          const send = () => postBridgeMessage({ kind: 'preferences', payload: { use_zed: zed.checked, theme: select.value || null, scale: Number(slider.value) } });
-          zed.addEventListener('change', send);
+          const send = () => postBridgeMessage({ kind: 'preferences', payload: { theme: select.value || null, scale: Number(slider.value) } });
           select.addEventListener('change', send);
           slider.addEventListener('input', () => { output.textContent = `${slider.value}%`; send(); });
         };

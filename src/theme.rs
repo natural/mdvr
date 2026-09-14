@@ -1,12 +1,9 @@
-//! Validated reader appearance and small Zed-theme importer.
+//! Validated reader appearance and theme importer.
 //!
 //! Imported values are reduced to colors and closed syntax roles. No CSS,
 //! JavaScript, editor command, or arbitrary style value leaves this module.
 
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::Path};
 
 use serde_json::{Map, Value};
 
@@ -200,257 +197,6 @@ impl ThemeFamily {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ZedFonts {
-    pub ui_family: Option<String>,
-    pub ui_weight: Option<String>,
-    pub buffer_family: Option<String>,
-    pub ui_size: Option<f32>,
-    pub buffer_size: Option<f32>,
-}
-
-#[derive(Clone, Debug)]
-pub struct ZedConfig {
-    pub theme: Option<Theme>,
-    pub fonts: ZedFonts,
-}
-
-#[derive(serde::Deserialize)]
-struct ZedSettings {
-    ui_font_weight: Option<String>,
-    ui_font_family: Option<String>,
-    buffer_font_family: Option<String>,
-    ui_font_size: Option<f32>,
-    buffer_font_size: Option<f32>,
-    theme: Option<ZedThemeSelection>,
-}
-
-#[derive(serde::Deserialize)]
-struct ZedThemeSelection {
-    mode: Option<String>,
-    light: Option<String>,
-    dark: Option<String>,
-}
-
-fn jsonc(source: &str) -> String {
-    let mut output = source
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("//"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    while output.contains(",\n}") || output.contains(",\n]") {
-        output = output.replace(",\n}", "\n}").replace(",\n]", "\n]");
-    }
-    output
-}
-
-fn safe_font(value: Option<String>) -> Option<String> {
-    value.filter(|value| {
-        value.len() <= 256
-            && !value.chars().any(|character| {
-                character.is_control() || matches!(character, ';' | '{' | '}' | '\n' | '\r')
-            })
-    })
-}
-
-fn zed_config_path() -> Option<PathBuf> {
-    env::var_os("HOME").map(|home| Path::new(&home).join(".config/zed/settings.json"))
-}
-
-fn color(value: Option<&Value>, vars: &Map<String, Value>) -> Option<String> {
-    let value = value?;
-    let value = value.get("color").unwrap_or(value);
-    let mut value = value.as_str()?.to_owned();
-    for _ in 0..3 {
-        if value.starts_with('#') {
-            return validate_color(&value).ok().map(|_| value);
-        }
-        value = vars.get(&value)?.as_str()?.to_owned();
-    }
-    None
-}
-
-fn zed_theme(path: &Path, name: &str) -> Option<Theme> {
-    let source = fs::read_to_string(path).ok()?;
-    let root: Value = serde_json::from_str(&jsonc(&source)).ok()?;
-    let root = root.as_object()?;
-    let selected = root
-        .get("themes")
-        .and_then(Value::as_array)
-        .and_then(|themes| {
-            themes.iter().find(|theme| {
-                theme
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .is_some_and(|theme_name| theme_name == name)
-            })
-        })
-        .cloned()
-        .unwrap_or_else(|| Value::Object(root.clone()));
-    let selected = selected.as_object()?;
-    let vars = selected
-        .get("vars")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    let colors = selected
-        .get("colors")
-        .and_then(Value::as_object)
-        .or_else(|| selected.get("style").and_then(Value::as_object))?;
-    let pick = |keys: &[&str]| keys.iter().find_map(|key| color(colors.get(*key), &vars));
-    let background = pick(&["editor.background", "background", "pageBg"]).or_else(|| {
-        color(
-            selected.get("export").and_then(|value| value.get("pageBg")),
-            &vars,
-        )
-    })?;
-    let foreground = pick(&["editor.foreground", "foreground", "text"])
-        .or_else(|| vars.get("fg").and_then(Value::as_str).map(str::to_owned))?;
-    let code_background = pick(&["editor.gutter.background", "mdCodeBlock", "codeBackground"])
-        .or_else(|| {
-            color(
-                selected.get("export").and_then(|value| value.get("cardBg")),
-                &vars,
-            )
-        })
-        .unwrap_or_else(|| background.clone());
-    let accent = pick(&["accent", "mdLink", "borderAccent"]).unwrap_or_else(|| foreground.clone());
-    let role = |key: &str| {
-        pick(&[key])
-            .or_else(|| {
-                let syntax_key = key.strip_prefix("syntax")?.to_ascii_lowercase();
-                color(
-                    colors
-                        .get("syntax")
-                        .and_then(Value::as_object)
-                        .and_then(|syntax| syntax.get(&syntax_key)),
-                    &vars,
-                )
-            })
-            .unwrap_or_else(|| foreground.clone())
-    };
-    let appearance = if selected
-        .get("appearance")
-        .and_then(Value::as_str)
-        .is_some_and(|appearance| appearance.eq_ignore_ascii_case("light"))
-    {
-        AppearanceMode::Light
-    } else {
-        AppearanceMode::Dark
-    };
-    Some(Theme {
-        name: selected
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or(name)
-            .to_owned(),
-        tokens: AppearanceTokens {
-            mode: appearance,
-            scale_percent: 100,
-            reader_background: background,
-            reader_foreground: foreground.clone(),
-            code_background,
-            accent,
-            syntax: vec![
-                SyntaxToken {
-                    role: SyntaxRole::Keyword,
-                    foreground: role("syntaxKeyword"),
-                    background: None,
-                    bold: false,
-                    italic: false,
-                },
-                SyntaxToken {
-                    role: SyntaxRole::String,
-                    foreground: role("syntaxString"),
-                    background: None,
-                    bold: false,
-                    italic: false,
-                },
-                SyntaxToken {
-                    role: SyntaxRole::Comment,
-                    foreground: role("syntaxComment"),
-                    background: None,
-                    bold: false,
-                    italic: true,
-                },
-                SyntaxToken {
-                    role: SyntaxRole::Number,
-                    foreground: role("syntaxNumber"),
-                    background: None,
-                    bold: false,
-                    italic: false,
-                },
-                SyntaxToken {
-                    role: SyntaxRole::Function,
-                    foreground: role("syntaxFunction"),
-                    background: None,
-                    bold: false,
-                    italic: false,
-                },
-                SyntaxToken {
-                    role: SyntaxRole::Type,
-                    foreground: role("syntaxType"),
-                    background: None,
-                    bold: false,
-                    italic: false,
-                },
-                SyntaxToken {
-                    role: SyntaxRole::Operator,
-                    foreground: role("syntaxOperator"),
-                    background: None,
-                    bold: false,
-                    italic: false,
-                },
-                SyntaxToken {
-                    role: SyntaxRole::Punctuation,
-                    foreground: role("syntaxPunctuation"),
-                    background: None,
-                    bold: false,
-                    italic: false,
-                },
-            ],
-        },
-    })
-}
-
-pub fn load_zed_config() -> Option<ZedConfig> {
-    let path = zed_config_path()?;
-    let source = fs::read_to_string(&path).ok()?;
-    let settings: ZedSettings = serde_json::from_str(&jsonc(&source)).ok()?;
-    let fonts = ZedFonts {
-        ui_family: safe_font(settings.ui_font_family),
-        ui_weight: safe_font(settings.ui_font_weight),
-        buffer_family: safe_font(settings.buffer_font_family),
-        ui_size: settings
-            .ui_font_size
-            .filter(|size| (8.0..=72.0).contains(size)),
-        buffer_size: settings
-            .buffer_font_size
-            .filter(|size| (8.0..=72.0).contains(size)),
-    };
-    let theme_name = settings.theme.as_ref().and_then(|theme| {
-        let dark = theme
-            .mode
-            .as_deref()
-            .is_none_or(|mode| mode.eq_ignore_ascii_case("dark"));
-        if dark {
-            theme.dark.clone()
-        } else {
-            theme.light.clone()
-        }
-    });
-    let theme = theme_name.and_then(|name| {
-        let themes = path.parent()?.join("themes");
-        fs::read_dir(themes)
-            .ok()?
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
-            .find_map(|path| zed_theme(&path, &name))
-    });
-    Some(ZedConfig { theme, fonts })
-}
-
 pub fn default_theme(mode: AppearanceMode) -> Theme {
     let dark = mode == AppearanceMode::Dark;
     let tokens = if dark {
@@ -476,9 +222,9 @@ pub fn default_theme(mode: AppearanceMode) -> Theme {
     };
     Theme {
         name: if dark {
-            "mdvr Light/Dark — Dark"
+            "Default Dark Theme"
         } else {
-            "mdvr Light/Dark — Light"
+            "Default Light Theme"
         }
         .into(),
         tokens,
@@ -487,59 +233,39 @@ pub fn default_theme(mode: AppearanceMode) -> Theme {
 
 pub fn default_family() -> ThemeFamily {
     ThemeFamily {
-        name: "mdvr defaults".into(),
+        name: "Built-in themes".into(),
         members: vec![
             default_theme(AppearanceMode::Light),
             default_theme(AppearanceMode::Dark),
+            tokyo_theme(AppearanceMode::Light),
+            tokyo_theme(AppearanceMode::Dark),
         ],
     }
 }
 
-pub fn available_family() -> ThemeFamily {
-    let mut family = default_family();
-    let Some(home) = env::var_os("HOME") else {
-        return family;
-    };
-    let installed = Path::new(&home).join("Library/Application Support/Zed/extensions/installed");
-    let Ok(extensions) = fs::read_dir(installed) else {
-        return family;
-    };
-    for extension in extensions.flatten() {
-        let themes = extension.path().join("themes");
-        let Ok(files) = fs::read_dir(themes) else {
-            continue;
-        };
-        for file in files.flatten() {
-            let path = file.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                continue;
-            }
-            let Ok(source) = fs::read_to_string(&path) else {
-                continue;
-            };
-            let Ok(root) = serde_json::from_str::<Value>(&jsonc(&source)) else {
-                continue;
-            };
-            let names = root
-                .get("themes")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|theme| theme.get("name").and_then(Value::as_str));
-            for name in names {
-                if let Some(theme) = zed_theme(&path, name)
-                    && !family
-                        .members
-                        .iter()
-                        .any(|member| member.name == theme.name)
-                {
-                    family.members.push(theme);
-                }
-            }
+fn tokyo_theme(mode: AppearanceMode) -> Theme {
+    let dark = mode == AppearanceMode::Dark;
+    Theme {
+        name: if dark {
+            "Tokyo Dark Theme"
+        } else {
+            "Tokyo Light Theme"
         }
+        .into(),
+        tokens: AppearanceTokens {
+            mode,
+            scale_percent: 100,
+            reader_background: if dark { "#1a1b26" } else { "#e6e7ed" }.into(),
+            reader_foreground: if dark { "#c0caf5" } else { "#3760bf" }.into(),
+            code_background: if dark { "#16161e" } else { "#d5d6db" }.into(),
+            accent: if dark { "#7aa2f7" } else { "#2e7de9" }.into(),
+            syntax: if dark {
+                default_dark_syntax()
+            } else {
+                default_light_syntax()
+            },
+        },
     }
-    family.sort_members();
-    family
 }
 
 pub fn import_family(source: &str) -> Result<ThemeFamily, ThemeError> {
@@ -761,7 +487,7 @@ fn normalize_color(value: &str) -> Result<String, ThemeError> {
     let valid_hex = |bytes: &[u8]| bytes.iter().all(u8::is_ascii_hexdigit);
     match bytes.len() {
         7 if value.starts_with('#') && valid_hex(&bytes[1..]) => Ok(value.to_owned()),
-        // Zed commonly emits #RRGGBBAA. Reader contract carries opaque #RRGGBB only.
+        // Accept opaque six-digit RGB values with optional FF alpha.
         9 if value.starts_with('#')
             && valid_hex(&bytes[1..])
             && bytes[7..].eq_ignore_ascii_case(b"ff") =>
@@ -830,7 +556,7 @@ fn token(role: SyntaxRole, foreground: &str) -> SyntaxToken {
 mod tests {
     use super::*;
 
-    const ZED: &str = r##"{
+    const IMPORTED_THEME: &str = r##"{
         "name": "Safe family",
         "themes": [{
             "name": "Safe dark",
@@ -852,7 +578,7 @@ mod tests {
 
     #[test]
     fn imports_family_and_maps_only_closed_tokens() {
-        let family = import_family(ZED).unwrap();
+        let family = import_family(IMPORTED_THEME).unwrap();
         assert_eq!(family.members.len(), 1);
         assert_eq!(family.members[0].tokens.syntax.len(), 2);
         assert_eq!(family.members[0].tokens.code_background, "#222222");
@@ -862,7 +588,7 @@ mod tests {
     fn malicious_known_values_are_rejected_and_current_theme_survives() {
         let mut current = default_theme(AppearanceMode::Light);
         let before = current.clone();
-        let bad = ZED.replace("#111111", "url(javascript:bad)");
+        let bad = IMPORTED_THEME.replace("#111111", "url(javascript:bad)");
         assert!(apply_import(&mut current, &bad).is_err());
         assert_eq!(current, before);
     }
